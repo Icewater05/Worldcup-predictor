@@ -1,0 +1,1723 @@
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import {
+  GripVertical, Trophy, Check, Users, Save, Info, Copy, RefreshCw, Zap,
+  X, Lock, Unlock, Crown, ShieldCheck, RotateCcw, Medal, Flag,
+  LogOut, Mail, GitBranch
+} from "lucide-react";
+
+/* ----------------------------- DATA ----------------------------- */
+// Official 2026 World Cup groups, listed in seeded (pot) order.
+const GROUPS = {
+  A: ["Mexico", "South Africa", "Korea Republic", "Czechia"],
+  B: ["Canada", "Bosnia & Herzegovina", "Qatar", "Switzerland"],
+  C: ["Brazil", "Morocco", "Haiti", "Scotland"],
+  D: ["United States", "Paraguay", "Australia", "Türkiye"],
+  E: ["Germany", "Curaçao", "Ivory Coast", "Ecuador"],
+  F: ["Netherlands", "Japan", "Sweden", "Tunisia"],
+  G: ["Belgium", "Egypt", "Iran", "New Zealand"],
+  H: ["Spain", "Cape Verde", "Saudi Arabia", "Uruguay"],
+  I: ["France", "Senegal", "Iraq", "Norway"],
+  J: ["Argentina", "Algeria", "Austria", "Jordan"],
+  K: ["Portugal", "DR Congo", "Uzbekistan", "Colombia"],
+  L: ["England", "Croatia", "Ghana", "Panama"],
+};
+const GROUP_KEYS = Object.keys(GROUPS);
+
+const FLAG = {
+  "Mexico": "🇲🇽", "South Africa": "🇿🇦", "Korea Republic": "🇰🇷", "Czechia": "🇨🇿",
+  "Canada": "🇨🇦", "Bosnia & Herzegovina": "🇧🇦", "Qatar": "🇶🇦", "Switzerland": "🇨🇭",
+  "Brazil": "🇧🇷", "Morocco": "🇲🇦", "Haiti": "🇭🇹", "Scotland": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+  "United States": "🇺🇸", "Paraguay": "🇵🇾", "Australia": "🇦🇺", "Türkiye": "🇹🇷",
+  "Germany": "🇩🇪", "Curaçao": "🇨🇼", "Ivory Coast": "🇨🇮", "Ecuador": "🇪🇨",
+  "Netherlands": "🇳🇱", "Japan": "🇯🇵", "Sweden": "🇸🇪", "Tunisia": "🇹🇳",
+  "Belgium": "🇧🇪", "Egypt": "🇪🇬", "Iran": "🇮🇷", "New Zealand": "🇳🇿",
+  "Spain": "🇪🇸", "Cape Verde": "🇨🇻", "Saudi Arabia": "🇸🇦", "Uruguay": "🇺🇾",
+  "France": "🇫🇷", "Senegal": "🇸🇳", "Iraq": "🇮🇶", "Norway": "🇳🇴",
+  "Argentina": "🇦🇷", "Algeria": "🇩🇿", "Austria": "🇦🇹", "Jordan": "🇯🇴",
+  "Portugal": "🇵🇹", "DR Congo": "🇨🇩", "Uzbekistan": "🇺🇿", "Colombia": "🇨🇴",
+  "England": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Croatia": "🇭🇷", "Ghana": "🇬🇭", "Panama": "🇵🇦",
+};
+
+// FOX Sports power ranking (Alexi Lalas, all 48 teams) — each team's power ranking
+const RANK = {
+  "France": 1, "Spain": 2, "England": 3, "Colombia": 4, "Argentina": 5, "Portugal": 6,
+  "Brazil": 7, "Netherlands": 8, "Germany": 9, "Croatia": 10, "Belgium": 11, "United States": 12,
+  "Morocco": 13, "Mexico": 14, "Uruguay": 15, "Norway": 16, "Ecuador": 17, "Japan": 18,
+  "Switzerland": 19, "Korea Republic": 20, "Türkiye": 21, "Canada": 22, "Senegal": 23, "Austria": 24,
+  "Sweden": 25, "Paraguay": 26, "Scotland": 27, "Ghana": 28, "Czechia": 29, "Iran": 30,
+  "Saudi Arabia": 31, "Bosnia & Herzegovina": 32, "Algeria": 33, "Egypt": 34, "Ivory Coast": 35, "Australia": 36,
+  "Jordan": 37, "Tunisia": 38, "DR Congo": 39, "Uzbekistan": 40, "Qatar": 41, "Iraq": 42,
+  "New Zealand": 43, "Cape Verde": 44, "South Africa": 45, "Panama": 46, "Curaçao": 47, "Haiti": 48,
+};
+
+// Map common web spellings to the app's canonical team names
+const ALL_TEAMS = Object.values(GROUPS).flat();
+const ALIAS = {
+  "south korea": "Korea Republic", "korea republic": "Korea Republic", "republic of korea": "Korea Republic",
+  "usa": "United States", "us": "United States", "united states": "United States", "united states of america": "United States",
+  "turkey": "Türkiye", "turkiye": "Türkiye", "türkiye": "Türkiye",
+  "ivory coast": "Ivory Coast", "cote d'ivoire": "Ivory Coast", "côte d'ivoire": "Ivory Coast",
+  "czech republic": "Czechia", "czechia": "Czechia",
+  "congo dr": "DR Congo", "dr congo": "DR Congo", "democratic republic of the congo": "DR Congo", "democratic republic of congo": "DR Congo",
+  "bosnia and herzegovina": "Bosnia & Herzegovina", "bosnia & herzegovina": "Bosnia & Herzegovina", "bosnia": "Bosnia & Herzegovina",
+  "cape verde": "Cape Verde", "cabo verde": "Cape Verde",
+  "curacao": "Curaçao", "curaçao": "Curaçao",
+};
+const resolveTeam = (raw) => {
+  if (!raw || typeof raw !== "string") return null;
+  const key = raw.toLowerCase().trim().replace(/\s+/g, " ");
+  if (ALIAS[key]) return ALIAS[key];
+  const hit = ALL_TEAMS.find((t) => t.toLowerCase() === key);
+  return hit || null;
+};
+
+/* --------------------------- SCORING ---------------------------- */
+// Per group:  +3 each team in exact finishing spot   (max 12)
+//             +2 both top-2 teams correct (any order)
+//             +3 all 4 positions perfectly correct
+//             max 17 / group
+const PTS_EXACT = 3, PTS_QUALIFIERS = 2, PTS_PERFECT = 3;
+
+function scoreGroup(pred, actual) {
+  let points = 0, exact = 0;
+  for (let i = 0; i < 4; i++) if (pred[i] === actual[i]) { points += PTS_EXACT; exact++; }
+  const predTop = new Set([pred[0], pred[1]]);
+  const qualifiers = [actual[0], actual[1]].every((t) => predTop.has(t));
+  if (qualifiers) points += PTS_QUALIFIERS;
+  const perfect = exact === 4;
+  if (perfect) points += PTS_PERFECT;
+  return { points, exact, qualifiers, perfect };
+}
+
+/* ------------------------- KNOCKOUT MODEL ----------------------- */
+// "Survive each round" predictor. From the 32 qualifiers you pick who reaches
+// each round. Points are per correct team that actually reaches that round.
+const KO_ROUNDS = [
+  { key: "r16", label: "Round of 16", count: 16, pts: 2, color: "#6FB1EC" },
+  { key: "qf", label: "Quarter-finals", count: 8, pts: 4, color: "#EE7E76" },
+  { key: "sf", label: "Semi-finals", count: 4, pts: 7, color: "#5FC076" },
+  { key: "final", label: "Final", count: 2, pts: 12, color: "#EBC25A" },
+  { key: "champion", label: "Champion", count: 1, pts: 25, color: "#F4D98A" },
+];
+const KO_MAX = KO_ROUNDS.reduce((s, r) => s + r.count * r.pts, 0); // 141
+const emptyKo = () => ({ r16: [], qf: [], sf: [], final: [], champion: [] });
+
+// keep each round a subset of the previous one
+function normalizeKo(ko) {
+  const r16 = ko.r16 || [];
+  const qf = (ko.qf || []).filter((t) => r16.includes(t));
+  const sf = (ko.sf || []).filter((t) => qf.includes(t));
+  const fin = (ko.final || []).filter((t) => sf.includes(t));
+  const champ = (ko.champion || []).filter((t) => fin.includes(t));
+  return { r16, qf, sf, final: fin, champion: champ };
+}
+
+// 32 qualifiers: top 2 of every final group + the 8 chosen third-place teams
+function poolOf32(results, thirds) {
+  if (!results) return [];
+  const pool = [];
+  for (const k of GROUP_KEYS) {
+    const g = results[k];
+    if (!g?.final || g.order?.length < 4) return []; // need all groups final
+    pool.push(g.order[0], g.order[1]);
+  }
+  return [...pool, ...(thirds || [])];
+}
+
+function scoreKnockout(ko, actual, finals) {
+  // actual: same shape; finals: { r16:bool, qf:bool, ... } which rounds count
+  let points = 0; const per = {};
+  for (const r of KO_ROUNDS) {
+    if (!finals?.[r.key]) continue;
+    const mine = new Set(ko?.[r.key] || []);
+    const real = actual?.[r.key] || [];
+    const hits = real.filter((t) => mine.has(t)).length;
+    per[r.key] = hits * r.pts;
+    points += per[r.key];
+  }
+  return { points, per };
+}
+
+/* --------------------------- STORAGE ---------------------------- */
+import { store, storageReady, supabase } from "./store.js";
+const PRED_PREFIX = "wc26:pred:";
+const RESULTS_KEY = "wc26:results";
+const KNOCKOUT_KEY = "wc26:knockout";
+const IDENTITY_KEY = "wc26:identity";
+const GROUP_PREFIX = "wc26:group:";
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
+const genCode = () => Array.from({ length: 5 }, () => CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)]).join("");
+const slug = (n) => n.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "anon";
+const freshPicks = () => Object.fromEntries(GROUP_KEYS.map((k) => [k, [...GROUPS[k]]]));
+const newToken = () => {
+  try { if (crypto?.randomUUID) return crypto.randomUUID(); } catch {}
+  return "t-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+};
+
+/* ----------------------------- UI ------------------------------- */
+const C = {
+  bg: "#FBFAF7", panel: "rgba(255,255,255,0.72)", panel2: "rgba(20,20,25,0.04)", line: "rgba(20,20,25,0.13)",
+  text: "#1A1712", mute: "#6E6A60", green: "#C8901C", greenDim: "#B08D3A",
+  gold: "#C8901C", coral: "#D9544A", blue: "#3E8FD6",
+  grad: "linear-gradient(135deg,#F3D27A 0%,#E8B84B 55%,#C99A3B 100%)",
+};
+const GRAD_SHADOW = "0 12px 30px rgba(200,144,28,.30)";
+
+function Styles() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap');
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      .wc-root { font-family: 'Plus Jakarta Sans', sans-serif; -webkit-font-smoothing: antialiased; }
+      .wc-display { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 800; letter-spacing: -.02em; }
+      .wc-mono { font-family: 'Space Mono', monospace; }
+      .wc-grad-text {
+        background: linear-gradient(135deg,#D9A93F 0%,#BE861F 55%,#8E5E12 100%);
+        -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent;
+      }
+      .wc-aurora {
+        background-color: #FBFAF7;
+        background-image:
+          radial-gradient(680px 480px at 10% -8%, rgba(232,184,75,.22), transparent 60%),
+          radial-gradient(640px 480px at 102% 2%, rgba(62,143,214,.08), transparent 55%),
+          radial-gradient(820px 700px at 50% 116%, rgba(217,84,74,.07), transparent 60%);
+        background-attachment: fixed;
+      }
+      .wc-glass { backdrop-filter: blur(16px) saturate(140%); -webkit-backdrop-filter: blur(16px) saturate(140%); }
+      .wc-fade { animation: wcFade .4s cubic-bezier(.2,.7,.2,1) both; }
+      @keyframes wcFade { from { opacity:0; transform: translateY(10px);} to {opacity:1; transform:none;} }
+      .wc-pop { animation: wcPop .28s cubic-bezier(.2,.9,.3,1.4) both; }
+      @keyframes wcPop { from { transform: scale(.95); opacity:.4;} to { transform:none; opacity:1;} }
+      .wc-btn { transition: transform .14s cubic-bezier(.2,.8,.3,1), filter .18s, background .18s, border-color .18s, opacity .18s; }
+      .wc-btn:active { transform: scale(.95); }
+      .wc-tab { transition: color .2s, background .2s, box-shadow .2s; }
+      .wc-row { transition: transform .2s cubic-bezier(.2,.8,.3,1), background .22s, border-color .22s; }
+      .wc-shine { background-size: 220% auto; animation: wcShine 4.5s linear infinite; }
+      @keyframes wcShine { to { background-position: 220% center; } }
+      .wc-glow { animation: wcGlow 3.2s ease-in-out infinite; }
+      @keyframes wcGlow { 0%,100% { filter: drop-shadow(0 0 0 rgba(200,144,28,0)); } 50% { filter: drop-shadow(0 0 14px rgba(200,144,28,.28)); } }
+      .wc-marquee { display: flex; gap: 16px; width: max-content; animation: wcMarquee 30s linear infinite; }
+      @keyframes wcMarquee { to { transform: translateX(-50%); } }
+      .wc-hero-card { transition: transform .18s cubic-bezier(.2,.8,.3,1), border-color .2s; }
+      .wc-hero-card:hover { transform: translateY(-3px); }
+      .wc-spin { animation: wcSpin 1s linear infinite; }
+      @keyframes wcSpin { to { transform: rotate(360deg); } }
+      input { font-family: inherit; }
+      input:focus { outline: none; }
+      ::-webkit-scrollbar { width: 9px; height: 9px; }
+      ::-webkit-scrollbar-thumb { background: rgba(20,20,25,.2); border-radius: 8px; }
+    `}</style>
+  );
+}
+
+function PosBadge({ n, advancing }) {
+  const color = advancing ? C.green : C.mute;
+  return (
+    <div className="wc-mono" style={{
+      width: 30, height: 30, flexShrink: 0, display: "grid", placeItems: "center",
+      fontSize: 16, fontWeight: 700, color,
+      border: `1.5px solid ${advancing ? C.green : C.line}`,
+      borderRadius: 8, background: advancing ? "rgba(232,184,75,.08)" : "transparent",
+    }}>{n}</div>
+  );
+}
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+// Drag-and-drop reorder list. Positions are fixed slots (1–4) with the advance
+// line between slot 2 and 3; you drag team cards between them via the grip handle.
+const STEP = 58, CARD_H = 46, LINE_H = 30;
+const topFor = (slot) => slot * STEP + (slot >= 2 ? LINE_H : 0);
+const LINE_TOP = topFor(1) + CARD_H + 6;
+const CONTAINER_H = topFor(3) + CARD_H;
+
+function DragList({ items, onReorder, editable }) {
+  const [drag, setDrag] = useState(null); // { index, dy, startY }
+
+  // provisional order while dragging
+  let prov = items, target = null;
+  if (drag) {
+    target = clamp(drag.index + Math.round(drag.dy / STEP), 0, items.length - 1);
+    prov = [...items];
+    const [m] = prov.splice(drag.index, 1);
+    prov.splice(target, 0, m);
+  }
+
+  const onDown = (e, index) => {
+    if (!editable) return;
+    e.preventDefault();
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+    setDrag({ index, dy: 0, startY: e.clientY });
+  };
+  const onMove = (e) => {
+    setDrag((d) => (d ? { ...d, dy: e.clientY - d.startY } : d));
+  };
+  const onUp = (e) => {
+    setDrag((d) => {
+      if (d) {
+        const t = clamp(d.index + Math.round(d.dy / STEP), 0, items.length - 1);
+        if (t !== d.index) {
+          const next = [...items];
+          const [m] = next.splice(d.index, 1);
+          next.splice(t, 0, m);
+          onReorder(next);
+        }
+      }
+      return null;
+    });
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
+  };
+
+  return (
+    <div style={{ position: "relative", height: CONTAINER_H }}>
+      {/* advance line — fixed between slots 2 and 3 */}
+      <div style={{ position: "absolute", left: 0, right: 0, top: LINE_TOP, height: LINE_H - 12, display: "flex", alignItems: "center", gap: 8, padding: "0 2px", pointerEvents: "none" }}>
+        <div style={{ flex: 1, height: 1, background: `repeating-linear-gradient(90deg, ${C.greenDim} 0 6px, transparent 6px 12px)` }} />
+        <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".12em", color: C.greenDim }}>ADVANCE LINE</span>
+        <div style={{ flex: 1, height: 1, background: `repeating-linear-gradient(90deg, ${C.greenDim} 0 6px, transparent 6px 12px)` }} />
+      </div>
+
+      {items.map((team) => {
+        const isDragging = drag && items[drag.index] === team;
+        const slot = prov.indexOf(team);
+        const advancing = slot < 2;
+        const top = isDragging ? topFor(drag.index) + drag.dy : topFor(slot);
+        return (
+          <div key={team} className="wc-row" style={{
+            position: "absolute", left: 0, right: 0, top, height: CARD_H,
+            display: "flex", alignItems: "center", gap: 10, padding: "0 8px 0 8px",
+            background: advancing ? "rgba(232,184,75,.06)" : "rgba(20,20,25,.045)",
+            borderRadius: 12, border: `1px solid ${advancing ? "rgba(232,184,75,.22)" : C.line}`,
+            transition: isDragging ? "none" : "top .22s cubic-bezier(.2,.8,.3,1), background .2s, border-color .2s",
+            zIndex: isDragging ? 30 : 1,
+            transform: isDragging ? "scale(1.03)" : "none",
+            boxShadow: isDragging ? "0 14px 32px rgba(20,20,25,.14)" : "none",
+            touchAction: isDragging ? "none" : "auto",
+          }}>
+            <PosBadge n={slot + 1} advancing={advancing} />
+            <span style={{ fontSize: 22, width: 26, textAlign: "center", flexShrink: 0 }}>{FLAG[team] || "🏳️"}</span>
+            <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "baseline", gap: 6 }}>
+              <span style={{ fontWeight: 700, fontSize: 15, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{team}</span>
+              {RANK[team] && <span className="wc-mono" style={{ fontSize: 10.5, fontWeight: 700, color: C.mute, opacity: .55, flexShrink: 0 }}>#{RANK[team]}</span>}
+            </div>
+            {editable && (
+              <div
+                onPointerDown={(e) => onDown(e, items.indexOf(team))}
+                onPointerMove={onMove}
+                onPointerUp={onUp}
+                onPointerCancel={onUp}
+                role="button" aria-label={`Drag ${team}`}
+                style={{
+                  flexShrink: 0, width: 40, height: CARD_H, display: "grid", placeItems: "center",
+                  color: isDragging ? C.green : C.mute, cursor: isDragging ? "grabbing" : "grab",
+                  touchAction: "none", marginRight: -4,
+                }}>
+                <GripVertical size={20} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function GroupCard({ gk, order, onReorder, editable, headerRight, scored }) {
+  return (
+    <div className="wc-fade wc-glass" style={{
+      background: C.panel, border: `1px solid ${C.line}`, borderRadius: 20, padding: 15,
+      boxShadow: "0 8px 24px rgba(20,20,25,.09)",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span className="wc-display" style={{ fontSize: 30, lineHeight: 1, color: C.text }}>{gk}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".14em", color: C.mute, textTransform: "uppercase" }}>Group</span>
+        </div>
+        {headerRight}
+      </div>
+      <DragList items={order} onReorder={(next) => onReorder(gk, next)} editable={editable} />
+      {scored != null && (
+        <div className="wc-mono" style={{ marginTop: 10, textAlign: "right", fontSize: 13, color: C.gold, fontWeight: 700 }}>
+          +{scored} pts
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PhaseToggle({ phase, setPhase, koLocked }) {
+  const Btn = ({ id, label }) => {
+    const active = phase === id;
+    const locked = id === "knockout" && koLocked;
+    return (
+      <button className="wc-btn" onClick={() => !locked && setPhase(id)} style={{
+        flex: 1, padding: "11px 8px", borderRadius: 12, border: "none",
+        cursor: locked ? "default" : "pointer", fontWeight: 800, fontSize: 13.5,
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+        background: active ? C.grad : "transparent", color: active ? "#201700" : (locked ? "rgba(139,157,150,.5)" : C.mute),
+        boxShadow: active ? GRAD_SHADOW : "none",
+      }}>
+        {locked && <Lock size={13} />} {label}
+      </button>
+    );
+  };
+  return (
+    <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: "rgba(20,20,25,.055)", border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 16 }}>
+      <Btn id="group" label="Group Stage" />
+      <Btn id="knockout" label="Knockout" />
+    </div>
+  );
+}
+
+function KnockoutBoard({ pool, ko, onToggle, editable, showFinals, finals, onToggleFinal, notReadyMsg }) {
+  if (!pool || pool.length < 32) {
+    return (
+      <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 20, textAlign: "center", color: C.mute }}>
+        <Lock size={26} style={{ margin: "0 auto", opacity: .7 }} />
+        <p style={{ marginTop: 10, fontSize: 13.5, fontWeight: 600 }}>{notReadyMsg || "The knockout bracket unlocks once all 12 group results are final."}</p>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {KO_ROUNDS.map((r, i) => {
+        const prev = i === 0 ? null : KO_ROUNDS[i - 1];
+        const candidates = i === 0 ? pool : (ko[prev.key] || []);
+        const selected = ko[r.key] || [];
+        const done = selected.length === r.count;
+        const isFinal = showFinals && finals?.[r.key];
+        return (
+          <div key={r.key} className="wc-fade wc-glass" style={{
+            background: C.panel, border: `1px solid ${isFinal ? "rgba(232,184,75,.4)" : C.line}`, borderRadius: 20, padding: 15,
+            boxShadow: "0 8px 24px rgba(20,20,25,.09)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+              <span style={{ width: 10, height: 10, borderRadius: 3, background: r.color, flexShrink: 0 }} />
+              <span className="wc-display" style={{ fontSize: 19 }}>{r.label}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: r.color }}>+{r.pts} each</span>
+              <span className="wc-mono" style={{ marginLeft: "auto", fontSize: 13, fontWeight: 700, color: done ? C.green : C.mute }}>
+                {selected.length}/{r.count}
+              </span>
+              {showFinals && (
+                <button className="wc-btn" onClick={() => onToggleFinal(r.key)} style={{
+                  display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 800,
+                  padding: "5px 9px", borderRadius: 999, cursor: "pointer",
+                  border: `1px solid ${isFinal ? C.green : C.line}`,
+                  background: isFinal ? "rgba(232,184,75,.12)" : "transparent",
+                  color: isFinal ? C.green : C.mute,
+                }}>{isFinal ? <Lock size={12} /> : <Unlock size={12} />}{isFinal ? "Official" : "Mark official"}</button>
+              )}
+            </div>
+            {candidates.length === 0 ? (
+              <div style={{ color: C.mute, fontSize: 12.5, fontWeight: 600, padding: "4px 2px" }}>
+                Pick your {prev.label} first to choose from them here.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {candidates.map((team) => {
+                  const on = selected.includes(team);
+                  const full = !on && selected.length >= r.count;
+                  return (
+                    <button key={team} className="wc-btn" disabled={!editable || full}
+                      onClick={() => onToggle(r.key, team)}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 12px",
+                        borderRadius: 999, fontSize: 13.5, fontWeight: 700, cursor: editable && !full ? "pointer" : "default",
+                        border: `1px solid ${on ? r.color : C.line}`,
+                        background: on ? r.color : "rgba(20,20,25,.045)",
+                        color: on ? "#201700" : (full ? "rgba(139,157,150,.5)" : C.text),
+                        opacity: full ? .5 : 1,
+                      }}>
+                      <span style={{ fontSize: 16 }}>{FLAG[team] || "🏳️"}</span>{team}
+                      {on && <Check size={14} />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TrackerCard({ teamsLeft, matchesLeft, matchesPlayed, stageLabel, survivors, compact }) {
+  const pct = Math.round((matchesPlayed / 104) * 100);
+  return (
+    <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 16, marginBottom: 16, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+        <span style={{ width: 8, height: 8, borderRadius: 999, background: C.gold, boxShadow: `0 0 0 4px rgba(232,184,75,.18)` }} />
+        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".16em", color: C.mute }}>TOURNAMENT TRACKER</span>
+        <span style={{ marginLeft: "auto", fontSize: 12.5, fontWeight: 800, color: C.gold }}>{stageLabel}</span>
+      </div>
+      <div style={{ display: "flex", gap: 10 }}>
+        {[["Teams left", teamsLeft, 48], ["Matches left", matchesLeft, 104]].map(([label, val, total]) => (
+          <div key={label} style={{ flex: 1, background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 14, padding: "12px 14px" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+              <span className="wc-mono" style={{ fontSize: 30, fontWeight: 700, color: C.text, lineHeight: 1 }}>{val}</span>
+              <span className="wc-mono" style={{ fontSize: 13, fontWeight: 700, color: C.mute }}>/ {total}</span>
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".06em", color: C.mute, marginTop: 6 }}>{label.toUpperCase()}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <div style={{ height: 7, borderRadius: 999, background: C.panel2, overflow: "hidden", border: `1px solid ${C.line}` }}>
+          <div style={{ width: `${pct}%`, height: "100%", background: C.grad, transition: "width .5s cubic-bezier(.2,.8,.3,1)" }} />
+        </div>
+        <div style={{ fontSize: 11, color: C.mute, fontWeight: 600, marginTop: 6 }}>
+          {matchesPlayed} of 104 matches played · {pct}% complete
+        </div>
+      </div>
+      {!compact && survivors && survivors.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".12em", color: C.mute, marginBottom: 8 }}>
+            {teamsLeft === 1 ? "CHAMPION" : "STILL ALIVE"}
+          </div>
+          {survivors.length <= 16 ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {survivors.map((t) => (
+                <span key={t} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: C.panel2, border: `1px solid ${teamsLeft === 1 ? C.gold : C.line}`, borderRadius: 999, padding: "5px 11px", fontSize: 12.5, fontWeight: 700 }}>
+                  <span style={{ fontSize: 15 }}>{FLAG[t] || "🏳️"}</span>{t}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, fontSize: 22, lineHeight: 1.1 }}>
+              {survivors.map((t) => <span key={t} title={t}>{FLAG[t] || "🏳️"}</span>)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AuthGate({ mode, setMode, email, setEmail, pw, setPw, error, notice, busy, onSignIn, onSignUp, ready }) {
+  const isSignup = mode === "signup";
+  const submit = () => (isSignup ? onSignUp() : onSignIn());
+  const inputStyle = { width: "100%", marginTop: 6, background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px 12px", color: C.text, fontSize: 15, fontWeight: 600 };
+  return (
+    <div className="wc-fade wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 22, padding: 22, maxWidth: 420, margin: "8px auto", boxShadow: "0 10px 30px rgba(20,20,25,.08)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+        <div style={{ width: 40, height: 40, borderRadius: 12, background: C.grad, display: "grid", placeItems: "center", boxShadow: GRAD_SHADOW }}>
+          <Trophy size={20} color="#201700" />
+        </div>
+        <div>
+          <div className="wc-display" style={{ fontSize: 22, lineHeight: 1 }}>{isSignup ? "Create account" : "Sign in"}</div>
+          <div style={{ fontSize: 12, color: C.mute, fontWeight: 600 }}>to play the World Cup Predictor</div>
+        </div>
+      </div>
+      {!ready && (
+        <p style={{ fontSize: 12, color: C.coral, fontWeight: 700, margin: "10px 0 0" }}>
+          Add your Supabase keys to .env to enable accounts.
+        </p>
+      )}
+      <div style={{ marginTop: 14 }}>
+        <label style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute, display: "flex", alignItems: "center", gap: 6 }}><Mail size={13} /> EMAIL</label>
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" style={inputStyle} />
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <label style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute, display: "flex", alignItems: "center", gap: 6 }}><Lock size={13} /> PASSWORD</label>
+        <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••"
+          onKeyDown={(e) => e.key === "Enter" && submit()} style={inputStyle} />
+      </div>
+      {error && <p style={{ fontSize: 12, color: C.coral, fontWeight: 700, margin: "10px 0 0" }}>{error}</p>}
+      {notice && <p style={{ fontSize: 12, color: C.green, fontWeight: 700, margin: "10px 0 0" }}>{notice}</p>}
+      <button className="wc-btn" onClick={submit} disabled={busy || !ready || !email.trim() || !pw} style={{
+        width: "100%", marginTop: 16, background: C.grad, color: "#201700", border: "none", borderRadius: 12,
+        padding: "14px", fontWeight: 800, fontSize: 15, cursor: busy ? "default" : "pointer", boxShadow: GRAD_SHADOW,
+        opacity: busy || !ready || !email.trim() || !pw ? .6 : 1,
+      }}>{busy ? "…" : isSignup ? "Create account" : "Sign in"}</button>
+      <button className="wc-btn" onClick={() => setMode(isSignup ? "signin" : "signup")} style={{
+        width: "100%", marginTop: 10, background: "transparent", color: C.mute, border: "none", fontWeight: 700, fontSize: 12.5, cursor: "pointer",
+      }}>{isSignup ? "Already have an account? Sign in" : "New here? Create an account"}</button>
+    </div>
+  );
+}
+
+function BracketView({ koPool, actual, finals, myPicks, koOpen }) {
+  const [mode, setMode] = useState("actual");
+  const ready = koPool && koPool.length === 32;
+  if (!ready) {
+    return (
+      <div className="wc-fade wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 20, textAlign: "center", color: C.mute }}>
+        <GitBranch size={26} style={{ margin: "0 auto", opacity: .7 }} />
+        <p style={{ marginTop: 10, fontSize: 13.5, fontWeight: 600 }}>The bracket appears once all 12 groups are final and the 32 qualifiers are set.</p>
+      </div>
+    );
+  }
+  const src = mode === "actual" ? (actual || {}) : (myPicks || {});
+  const cols = [
+    { key: "r32", label: "Round of 32", teams: koPool, color: C.mute },
+    { key: "r16", label: "Round of 16", teams: src.r16 || [], color: "#6FB1EC" },
+    { key: "qf", label: "Quarter-finals", teams: src.qf || [], color: "#EE7E76" },
+    { key: "sf", label: "Semi-finals", teams: src.sf || [], color: "#5FC076" },
+    { key: "final", label: "Final", teams: src.final || [], color: "#EBC25A" },
+    { key: "champion", label: "Champion", teams: src.champion || [], color: C.gold },
+  ];
+  return (
+    <div className="wc-fade">
+      <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: "rgba(20,20,25,.055)", border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 14 }}>
+        {[["actual", "Actual results"], ["mine", "My picks"]].map(([id, label]) => (
+          <button key={id} className="wc-btn" onClick={() => setMode(id)} style={{
+            flex: 1, padding: "10px 8px", borderRadius: 12, border: "none", cursor: "pointer", fontWeight: 800, fontSize: 13,
+            background: mode === id ? C.grad : "transparent", color: mode === id ? "#201700" : C.mute,
+            boxShadow: mode === id ? GRAD_SHADOW : "none",
+          }}>{label}</button>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8 }}>
+        {cols.map((col) => (
+          <div key={col.key} style={{ flex: "0 0 auto", width: col.key === "r32" ? 168 : 150 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, position: "sticky", top: 0 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 3, background: col.color, flexShrink: 0 }} />
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".04em", color: C.text }}>{col.label}</span>
+              <span className="wc-mono" style={{ marginLeft: "auto", fontSize: 10.5, color: C.mute }}>{col.teams.length}</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {col.teams.length === 0 ? (
+                <div style={{ fontSize: 11.5, color: C.mute, fontWeight: 600, padding: "8px 4px", opacity: .7 }}>—</div>
+              ) : col.teams.map((t) => {
+                const champ = col.key === "champion";
+                return (
+                  <div key={t} className="wc-glass" style={{
+                    display: "flex", alignItems: "center", gap: 7, padding: champ ? "10px 10px" : "8px 9px",
+                    background: champ ? "rgba(232,184,75,.16)" : C.panel,
+                    border: `1px solid ${champ ? C.gold : C.line}`, borderRadius: 11,
+                    boxShadow: champ ? "0 8px 22px rgba(232,184,75,.18)" : "none",
+                  }}>
+                    {champ && <Crown size={15} color={C.gold} style={{ flexShrink: 0 }} />}
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>{FLAG[t] || "🏳️"}</span>
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t}</span>
+                    {RANK[t] && <span className="wc-mono" style={{ fontSize: 9.5, fontWeight: 700, color: C.mute, opacity: .5, marginLeft: "auto", flexShrink: 0 }}>#{RANK[t]}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p style={{ fontSize: 11, color: C.mute, marginTop: 10, fontWeight: 600 }}>
+        {mode === "actual"
+          ? "Live bracket from official results — each column shows who reached that round."
+          : "Your predicted run — who you tapped to advance through each round."}
+      </p>
+    </div>
+  );
+}
+
+/* --------------------------- MAIN APP --------------------------- */
+export default function App() {
+  const [view, setView] = useState("predict");
+  const [name, setName] = useState("");
+  const [committed, setCommitted] = useState(false);
+  const [identity, setIdentity] = useState(null); // { name, slug:uid, token:uid, uid, email, groupCode, groupName }
+  const [nameError, setNameError] = useState("");
+  const [session, setSession] = useState(null);   // Supabase auth session (or null)
+  const [authReady, setAuthReady] = useState(false);
+  const [authMode, setAuthMode] = useState("signin"); // "signin" | "signup"
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPw, setAuthPw] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authNotice, setAuthNotice] = useState("");
+  const [picks, setPicks] = useState(freshPicks);
+  const [results, setResults] = useState(null);    // { A: {order, final}, ... }
+  const [resultsDraft, setResultsDraft] = useState(() =>
+    Object.fromEntries(GROUP_KEYS.map((k) => [k, { order: [...GROUPS[k]], final: false }])));
+  const [allPreds, setAllPreds] = useState([]);
+  const [toast, setToast] = useState(null);
+  const [showScoring, setShowScoring] = useState(false);
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [phase, setPhase] = useState("group"); // "group" | "knockout"
+  const [koPicks, setKoPicks] = useState(emptyKo); // this user's knockout picks
+  const [knockout, setKnockout] = useState(null);  // shared: { open, thirds, actual, finals }
+  const [koDraft, setKoDraft] = useState({ open: false, thirds: [], actual: emptyKo(), finals: {} });
+  const [scope, setScope] = useState("global"); // leaderboard scope: "league" | "global"
+  const [leagueMode, setLeagueMode] = useState("none"); // "none" | "create" | "join"
+  const [leagueNameInput, setLeagueNameInput] = useState("");
+  const [leagueCodeInput, setLeagueCodeInput] = useState("");
+  const [leagueError, setLeagueError] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [lastSync, setLastSync] = useState(null);
+  const didAutoSync = useRef(false);
+
+  const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2200); };
+
+  const loadAll = useCallback(async () => {
+    const list = await store.list(PRED_PREFIX);
+    const preds = [];
+    for (const k of list.keys) {
+      const r = await store.get(k);
+      if (r?.value) { try { preds.push(JSON.parse(r.value)); } catch {} }
+    }
+    preds.sort((a, b) => (a.submittedAt || 0) - (b.submittedAt || 0));
+    setAllPreds(preds);
+    const rr = await store.get(RESULTS_KEY);
+    if (rr?.value) {
+      try {
+        const parsed = JSON.parse(rr.value);
+        setResults(parsed);
+        setResultsDraft((d) => ({ ...d, ...parsed }));
+      } catch {}
+    }
+    const kk = await store.get(KNOCKOUT_KEY);
+    if (kk?.value) {
+      try {
+        const parsed = JSON.parse(kk.value);
+        const norm = {
+          open: !!parsed.open,
+          thirds: parsed.thirds || [],
+          actual: { ...emptyKo(), ...(parsed.actual || {}) },
+          finals: parsed.finals || {},
+        };
+        setKnockout(norm);
+        setKoDraft(norm);
+      } catch {}
+    }
+  }, []);
+
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  // Load this account's profile (display name + league) and saved picks
+  const loadProfile = useCallback(async (user) => {
+    if (!user) return;
+    const uid = user.id;
+    let prof = null;
+    if (supabase) {
+      const { data } = await supabase.from("profiles").select("name, group_code").eq("id", uid).maybeSingle();
+      prof = data || null;
+    }
+    let groupName = null;
+    if (prof?.group_code && supabase) {
+      const gr = await store.get(GROUP_PREFIX + prof.group_code);
+      if (gr?.value) { try { groupName = JSON.parse(gr.value).name; } catch {} }
+    }
+    const id = {
+      name: prof?.name || "", slug: uid, token: uid, uid, email: user.email,
+      groupCode: prof?.group_code || null, groupName,
+    };
+    setIdentity(id);
+    setName(id.name);
+    if (id.groupCode) setScope("league");
+    setCommitted(!!id.name);
+    // load saved picks for this account
+    const pr = await store.get(PRED_PREFIX + uid);
+    if (pr?.value) {
+      try {
+        const rec = JSON.parse(pr.value);
+        if (rec.groups) setPicks(rec.groups);
+        if (rec.ko) setKoPicks(normalizeKo(rec.ko));
+      } catch {}
+    }
+  }, []);
+
+  // Auth: track the session and react to sign-in / sign-out
+  useEffect(() => {
+    if (!supabase) { setAuthReady(true); return; }
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session || null);
+      if (data.session?.user) loadProfile(data.session.user);
+      setAuthReady(true);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, sess) => {
+      setSession(sess || null);
+      if (sess?.user) { loadProfile(sess.user); }
+      else { setIdentity(null); setCommitted(false); setName(""); setPicks(freshPicks()); setKoPicks(emptyKo()); }
+    });
+    return () => sub?.subscription?.unsubscribe?.();
+  }, [loadProfile]);
+
+  const signIn = async () => {
+    if (!supabase) return;
+    setAuthBusy(true); setAuthError(""); setAuthNotice("");
+    const { error } = await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPw });
+    if (error) setAuthError(error.message);
+    setAuthBusy(false);
+  };
+  const signUp = async () => {
+    if (!supabase) return;
+    setAuthBusy(true); setAuthError(""); setAuthNotice("");
+    const { data, error } = await supabase.auth.signUp({ email: authEmail.trim(), password: authPw });
+    if (error) setAuthError(error.message);
+    else if (!data.session) setAuthNotice("Check your email to confirm your account, then sign in.");
+    setAuthBusy(false);
+  };
+  const signOut = async () => {
+    if (supabase) await supabase.auth.signOut();
+    setIdentity(null); setCommitted(false); setName(""); setPicks(freshPicks()); setKoPicks(emptyKo()); setPhase("group"); setScope("global");
+  };
+
+  useEffect(() => {
+    if (view === "results" && adminUnlocked && !didAutoSync.current) {
+      didAutoSync.current = true;
+      autoSync();
+    }
+  }, [view, adminUnlocked]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const reorderGroup = (gk, next) => setPicks((p) => ({ ...p, [gk]: next }));
+  const reorderResult = (gk, next) => setResultsDraft((p) => ({ ...p, [gk]: { ...p[gk], order: next } }));
+
+  const commitName = async () => {
+    const nm = name.trim();
+    if (!nm || !identity?.uid) return;
+    setNameError("");
+    if (supabase) {
+      // name must be globally unique (case-insensitive), unless it's already mine
+      const { data: taken } = await supabase
+        .from("profiles").select("id").eq("name_lower", nm.toLowerCase()).neq("id", identity.uid).maybeSingle();
+      if (taken) { setNameError(`"${nm}" is already taken — choose a different name.`); return; }
+      const { error } = await supabase.from("profiles").upsert(
+        { id: identity.uid, name: nm, name_lower: nm.toLowerCase(), group_code: identity.groupCode || null },
+        { onConflict: "id" }
+      );
+      if (error) { setNameError(error.message.includes("duplicate") ? `"${nm}" is already taken — choose a different name.` : error.message); return; }
+    }
+    const id = { ...identity, name: nm };
+    setIdentity(id);
+    setCommitted(true);
+    // tag any existing prediction with the (possibly updated) name
+    const pr = await store.get(PRED_PREFIX + identity.uid);
+    if (pr?.value) {
+      try { const rec = JSON.parse(pr.value); rec.name = nm; await store.set(PRED_PREFIX + identity.uid, JSON.stringify(rec)); } catch {}
+    }
+    await loadAll();
+    flash("Name locked in 🔒");
+  };
+
+  const submit = async () => {
+    if (!identity) return;
+    const s = identity.slug;
+    // Race guard: don't clobber someone else who claimed this name first
+    const existing = await store.get(PRED_PREFIX + s);
+    if (existing?.value) {
+      try {
+        const rec = JSON.parse(existing.value);
+        if (rec.ownerToken && rec.ownerToken !== identity.token) {
+          setCommitted(false);
+          setNameError(`"${identity.name}" was just taken by someone else — pick another name.`);
+          setView("predict");
+          return;
+        }
+      } catch {}
+    }
+    const payload = { slug: s, name: identity.name, groups: picks, ko: normalizeKo(koPicks), groupCode: identity.groupCode || null, ownerToken: identity.token, submittedAt: Date.now() };
+    await store.set(PRED_PREFIX + s, JSON.stringify(payload));
+    await loadAll();
+    flash(phase === "knockout" ? "Knockout picks saved! 🏆" : "Predictions saved! 🎯");
+  };
+
+  const saveResults = async () => {
+    await store.set(RESULTS_KEY, JSON.stringify(resultsDraft));
+    setResults(resultsDraft);
+    await loadAll();
+    flash("Results updated — scores recalculated");
+  };
+
+  // toggle a team within a knockout round (cascade-prunes later rounds)
+  const toggleKoRound = (setter, roundKey, team) => {
+    const r = KO_ROUNDS.find((x) => x.key === roundKey);
+    setter((prev) => {
+      const cur = prev[roundKey] || [];
+      let next;
+      if (cur.includes(team)) next = cur.filter((t) => t !== team);
+      else if (r.count === 1) next = [team];
+      else if (cur.length < r.count) next = [...cur, team];
+      else next = cur;
+      return normalizeKo({ ...prev, [roundKey]: next });
+    });
+  };
+  const toggleKoPick = (roundKey, team) => toggleKoRound(setKoPicks, roundKey, team);
+  const toggleKoActual = (roundKey, team) =>
+    setKoDraft((d) => {
+      const fake = { ...d.actual };
+      const r = KO_ROUNDS.find((x) => x.key === roundKey);
+      const cur = fake[roundKey] || [];
+      let next;
+      if (cur.includes(team)) next = cur.filter((t) => t !== team);
+      else if (r.count === 1) next = [team];
+      else if (cur.length < r.count) next = [...cur, team];
+      else next = cur;
+      return { ...d, actual: normalizeKo({ ...fake, [roundKey]: next }) };
+    });
+  const toggleThird = (team) =>
+    setKoDraft((d) => {
+      const cur = d.thirds || [];
+      if (cur.includes(team)) return { ...d, thirds: cur.filter((t) => t !== team) };
+      if (cur.length >= 8) return d;
+      return { ...d, thirds: [...cur, team] };
+    });
+  const toggleKoFinal = (roundKey) =>
+    setKoDraft((d) => ({ ...d, finals: { ...d.finals, [roundKey]: !d.finals?.[roundKey] } }));
+  const saveKnockout = async () => {
+    await store.set(KNOCKOUT_KEY, JSON.stringify(koDraft));
+    setKnockout(koDraft);
+    await loadAll();
+    flash("Knockout updated — scores recalculated");
+  };
+
+  // Auto-fill results from the live web via the built-in AI + web search
+  const autoSync = async () => {
+    if (syncing) return;
+    setSyncing(true); setSyncMsg("");
+    try {
+      const res = await fetch("/api/sync", { method: "POST" });
+      const j = await res.json();
+      if (!j || j.ok === false) throw new Error((j && j.error) || "sync-failed");
+      await loadAll();
+      setLastSync(Date.now());
+      const groupsSet = j.groupsSet || 0, koRounds = j.koRounds || 0;
+      setSyncMsg(groupsSet === 0 && koRounds === 0
+        ? "No completed matches found yet — nothing to update."
+        : `Synced ${groupsSet}/12 groups${koRounds ? ` and ${koRounds} knockout round${koRounds > 1 ? "s" : ""}` : ""}. Scores updated.`);
+    } catch (e) {
+      setSyncMsg("Couldn't fetch live results just now. Try again, or enter results manually below.");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // ---- private leagues ----
+  const persistIdentity = async (id) => {
+    setIdentity(id);
+    if (supabase && id?.uid) {
+      await supabase.from("profiles").upsert(
+        { id: id.uid, name: id.name, name_lower: (id.name || "").toLowerCase(), group_code: id.groupCode || null },
+        { onConflict: "id" }
+      );
+    }
+  };
+  // keep this device's submitted prediction tagged with the current league
+  const patchMyGroupCode = async (code) => {
+    if (!identity) return;
+    const r = await store.get(PRED_PREFIX + identity.slug);
+    if (r?.value) {
+      try {
+        const rec = JSON.parse(r.value);
+        if (!rec.ownerToken || rec.ownerToken === identity.token) {
+          rec.groupCode = code || null;
+          await store.set(PRED_PREFIX + identity.slug, JSON.stringify(rec));
+        }
+      } catch {}
+    }
+  };
+  const createLeague = async () => {
+    if (!identity) return;
+    setLeagueError("");
+    const nm = leagueNameInput.trim() || "Untitled League";
+    let code = genCode();
+    for (let i = 0; i < 8; i++) {
+      const existing = await store.get(GROUP_PREFIX + code);
+      if (!existing?.value) break;
+      code = genCode();
+    }
+    await store.set(GROUP_PREFIX + code, JSON.stringify({ code, name: nm, createdAt: Date.now() }));
+    await persistIdentity({ ...identity, groupCode: code, groupName: nm });
+    await patchMyGroupCode(code);
+    setLeagueMode("none"); setLeagueNameInput(""); setScope("league");
+    await loadAll();
+    flash(`League created · code ${code}`);
+  };
+  const joinLeague = async () => {
+    if (!identity) return;
+    const code = leagueCodeInput.trim().toUpperCase();
+    if (!code) return;
+    const r = await store.get(GROUP_PREFIX + code);
+    if (!r?.value) { setLeagueError(`No league found with code "${code}".`); return; }
+    let g; try { g = JSON.parse(r.value); } catch { g = { code, name: "League" }; }
+    setLeagueError("");
+    await persistIdentity({ ...identity, groupCode: code, groupName: g.name });
+    await patchMyGroupCode(code);
+    setLeagueMode("none"); setLeagueCodeInput(""); setScope("league");
+    await loadAll();
+    flash(`Joined ${g.name}! 🤝`);
+  };
+  const leaveLeague = async () => {
+    if (!identity) return;
+    await persistIdentity({ ...identity, groupCode: null, groupName: null });
+    await patchMyGroupCode(null);
+    setScope("global");
+    await loadAll();
+    flash("Left the league");
+  };
+  const copyCode = async (code) => {
+    try { await navigator.clipboard.writeText(code); flash("Code copied — share it!"); }
+    catch { flash(`Code: ${code}`); }
+  };
+
+  const resetAll = async () => {
+    if (!window.confirm("Delete ALL predictions and results for everyone? This cannot be undone.")) return;
+    const list = await store.list(PRED_PREFIX);
+    for (const k of list.keys) await store.del(k);
+    await store.del(RESULTS_KEY);
+    await store.del(KNOCKOUT_KEY);
+    const groups = await store.list(GROUP_PREFIX);
+    for (const k of groups.keys) await store.del(k);
+    setResults(null);
+    setKnockout(null);
+    setKoDraft({ open: false, thirds: [], actual: emptyKo(), finals: {} });
+    setResultsDraft(Object.fromEntries(GROUP_KEYS.map((k) => [k, { order: [...GROUPS[k]], final: false }])));
+    await loadAll();
+    flash("Everything reset");
+  };
+
+  // ----- leaderboard math -----
+  const finalGroups = results ? GROUP_KEYS.filter((k) => results[k]?.final && results[k].order?.length === 4) : [];
+  const koActual = knockout?.actual;
+  const koFinals = knockout?.finals || {};
+  const koScoredRounds = KO_ROUNDS.filter((r) => koFinals?.[r.key]);
+  const standings = allPreds.map((p) => {
+    let groupPts = 0; const per = {};
+    for (const k of finalGroups) {
+      const s = scoreGroup(p.groups[k], results[k].order);
+      per[k] = s.points; groupPts += s.points;
+    }
+    const ks = scoreKnockout(p.ko, koActual, koFinals);
+    return { ...p, groupPts, koPts: ks.points, koPer: ks.per, total: groupPts + ks.points, per };
+  }).sort((a, b) => b.total - a.total || a.submittedAt - b.submittedAt);
+
+  // league scope
+  const myCode = identity?.groupCode || null;
+  const inLeague = !!myCode;
+  const useLeague = scope === "league" && inLeague;
+  const scopedStandings = useLeague ? standings.filter((p) => p.groupCode === myCode) : standings;
+  const scopedPreds = useLeague ? allPreds.filter((p) => p.groupCode === myCode) : allPreds;
+
+  // pool of 32 qualifiers (uses saved third-place selection)
+  const koPool = poolOf32(results, knockout?.thirds);
+  const koPoolDraft = poolOf32(results, koDraft.thirds);
+  const allGroupsFinal = finalGroups.length === 12;
+  const thirdTeams = allGroupsFinal ? GROUP_KEYS.map((k) => results[k].order[2]) : [];
+
+  // ----- tournament tracker: remaining teams & matches -----
+  const kf = koFinals;
+  const teamsLeft = kf.champion ? 1 : kf.final ? 2 : kf.sf ? 4 : kf.qf ? 8 : kf.r16 ? 16 : allGroupsFinal ? 32 : 48;
+  const matchesPlayed =
+    finalGroups.length * 6 +                       // 6 matches per completed group
+    (kf.r16 ? 16 : 0) + (kf.qf ? 8 : 0) + (kf.sf ? 4 : 0) +
+    (kf.final ? 2 : 0) + (kf.champion ? 2 : 0);     // champion done ⇒ final + 3rd-place played
+  const matchesLeft = 104 - matchesPlayed;
+  const stageLabel = kf.champion ? "Champion crowned 🏆" : kf.final ? "The Final" : kf.sf ? "Semi-finals"
+    : kf.qf ? "Quarter-finals" : kf.r16 ? "Round of 16" : allGroupsFinal ? "Round of 32"
+    : finalGroups.length > 0 ? "Group stage" : "Kicks off June 11";
+  const survivors = kf.champion ? (koActual?.champion || [])
+    : kf.final ? (koActual?.final || []) : kf.sf ? (koActual?.sf || [])
+    : kf.qf ? (koActual?.qf || []) : kf.r16 ? (koActual?.r16 || [])
+    : (allGroupsFinal && koPool.length === 32 ? koPool : null);
+
+  // consensus winners (pre-results)
+  const consensus = GROUP_KEYS.map((k) => {
+    const tally = {};
+    scopedPreds.forEach((p) => { const w = p.groups[k]?.[0]; if (w) tally[w] = (tally[w] || 0) + 1; });
+    const top = Object.entries(tally).sort((a, b) => b[1] - a[1])[0];
+    return { gk: k, team: top?.[0], votes: top?.[1] || 0 };
+  });
+
+  return (
+    <div className="wc-root wc-aurora" style={{ minHeight: "100vh", color: C.text, paddingBottom: 90 }}>
+      <Styles />
+
+      {/* Header / Hero */}
+      <header style={{ padding: "20px 16px 20px", borderBottom: `1px solid ${C.line}`, position: "relative", overflow: "hidden" }}>
+        {/* decorative flag marquee */}
+        <div style={{ position: "absolute", top: 8, left: 0, right: 0, opacity: .1, pointerEvents: "none", overflow: "hidden", WebkitMaskImage: "linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent)", maskImage: "linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent)" }}>
+          <div className="wc-marquee" style={{ fontSize: 24 }}>
+            {[...Object.values(FLAG), ...Object.values(FLAG)].map((f, i) => <span key={i}>{f}</span>)}
+          </div>
+        </div>
+
+        <div style={{ position: "relative" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10.5, fontWeight: 800, letterSpacing: ".2em", color: C.green, marginBottom: 10, marginTop: 14, padding: "5px 11px", borderRadius: 999, border: `1px solid ${C.line}`, background: "rgba(232,184,75,.07)" }}>
+            FIFA WORLD CUP 2026 · 🇺🇸 🇨🇦 🇲🇽
+          </div>
+          <h1 className="wc-display wc-glow" style={{ fontSize: "clamp(36px,11vw,58px)", lineHeight: .88, margin: 0 }}>
+            World Cup<br /><span className="wc-grad-text wc-shine">Predictor</span>
+          </h1>
+          <p style={{ color: C.text, fontSize: 15, marginTop: 12, maxWidth: 560, lineHeight: 1.5, fontWeight: 600 }}>
+            The ultimate <span style={{ color: C.green }}>bragging-rights showdown</span> for you and your crew. Spin up a <span style={{ color: C.blue }}>private league</span>, call all 48 teams, conquer the bracket, and climb both your league and the <span style={{ color: C.blue }}>global leaderboard</span>. 🏆
+          </p>
+
+          {/* stat strip */}
+          <div className="wc-glass" style={{ display: "flex", gap: 4, marginTop: 16, padding: 4, background: "rgba(20,20,25,.045)", border: `1px solid ${C.line}`, borderRadius: 14 }}>
+            {[["48", "TEAMS"], ["12", "GROUPS"], ["104", "MATCHES"], [`${204 + KO_MAX}`, "MAX PTS"]].map(([n, l], i) => (
+              <div key={l} style={{ flex: 1, textAlign: "center", padding: "8px 2px", borderLeft: i ? `1px solid ${C.line}` : "none" }}>
+                <div className="wc-mono" style={{ fontSize: 19, fontWeight: 700, color: C.text, lineHeight: 1 }}>{n}</div>
+                <div style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: ".1em", color: C.mute, marginTop: 4 }}>{l}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* how it works */}
+          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".18em", color: C.mute, margin: "20px 0 10px" }}>HOW IT WORKS</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {[
+              { n: 1, icon: Flag, color: "#E8B84B", t: "Claim Your Name", d: "Lock in a one-of-a-kind handle. No duplicates, no impostors — your picks stay yours." },
+              { n: 2, icon: GripVertical, color: "#6FB1EC", t: "Rank the Groups", d: "Drag teams into your predicted finishing order. Nail the table for max points." },
+              { n: 3, icon: Trophy, color: "#5FC076", t: "Conquer the Bracket", d: "Round of 16 to the Final — call who survives all the way to champion." },
+              { n: 4, icon: Crown, color: "#EE7E76", t: "Leagues & Glory", d: "Battle a private league via join code, plus the global board. One champion of the pool." },
+            ].map((c) => (
+              <div key={c.n} className="wc-hero-card wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 13 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <div style={{ width: 30, height: 30, borderRadius: 9, display: "grid", placeItems: "center", background: `${c.color}1f`, border: `1px solid ${c.color}55`, flexShrink: 0 }}>
+                    <c.icon size={16} color={c.color} />
+                  </div>
+                  <span className="wc-mono" style={{ fontSize: 12, fontWeight: 700, color: c.color }}>0{c.n}</span>
+                </div>
+                <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 3 }}>{c.t}</div>
+                <div style={{ fontSize: 11.5, color: C.mute, lineHeight: 1.45 }}>{c.d}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* two-round note + CTAs */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, padding: "10px 13px", borderRadius: 12, background: "rgba(232,184,75,.06)", border: `1px solid ${C.line}` }}>
+            <Trophy size={16} color={C.gold} style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 12.5, color: C.mute, fontWeight: 600 }}>
+              <b style={{ color: C.text }}>Two rounds, one champion:</b> group-stage points carry straight into the knockout — every pick counts to the final whistle.
+            </span>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+            <button className="wc-btn" onClick={() => setView("predict")} style={{
+              display: "inline-flex", alignItems: "center", gap: 7, background: C.grad, color: "#201700",
+              border: "none", borderRadius: 999, padding: "11px 18px", fontSize: 14, fontWeight: 800,
+              cursor: "pointer", boxShadow: GRAD_SHADOW,
+            }}><Flag size={15} /> Start predicting</button>
+            <button className="wc-btn" onClick={() => setShowScoring(true)} style={{
+              display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(232,184,75,.07)",
+              color: C.gold, border: `1px solid ${C.line}`, borderRadius: 999, padding: "11px 16px",
+              fontSize: 13.5, fontWeight: 700, cursor: "pointer",
+            }}><Info size={14} /> How scoring works</button>
+          </div>
+        </div>
+      </header>
+
+      {/* Tabs */}
+      {session && (
+      <nav className="wc-glass" style={{ display: "flex", gap: 5, padding: "8px 10px", position: "sticky", top: 0, zIndex: 20, background: "rgba(251,250,247,.78)", borderBottom: `1px solid ${C.line}` }}>
+        {[["predict", "Predict", Flag], ["board", "Board", Trophy], ["bracket", "Bracket", GitBranch], ["results", "Results", ShieldCheck]].map(([id, label, Icon]) => (
+          <button key={id} className="wc-tab wc-btn" onClick={() => setView(id)} style={{
+            flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+            padding: "11px 4px", borderRadius: 14, border: "none", cursor: "pointer",
+            fontWeight: 800, fontSize: 12.5,
+            background: view === id ? C.grad : "rgba(20,20,25,.055)",
+            color: view === id ? "#201700" : C.mute,
+            boxShadow: view === id ? GRAD_SHADOW : "none",
+          }}><Icon size={14} /> {label}</button>
+        ))}
+      </nav>
+      )}
+
+      <main style={{ maxWidth: 620, margin: "0 auto", padding: "16px 12px" }}>
+        {!authReady ? (
+          <div style={{ textAlign: "center", padding: "40px 20px", color: C.mute }}>
+            <RefreshCw size={26} className="wc-spin" style={{ margin: "0 auto" }} />
+            <p style={{ marginTop: 12, fontWeight: 600, fontSize: 14 }}>Loading…</p>
+          </div>
+        ) : !session ? (
+          <AuthGate
+            mode={authMode} setMode={setAuthMode}
+            email={authEmail} setEmail={setAuthEmail}
+            pw={authPw} setPw={setAuthPw}
+            error={authError} notice={authNotice} busy={authBusy}
+            onSignIn={signIn} onSignUp={signUp} ready={!!supabase}
+          />
+        ) : (
+        <>
+        {/* ---------------- PREDICT ---------------- */}
+        {view === "predict" && (
+          <div>
+            {committed && identity ? (
+              <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 16, marginBottom: 16, boxShadow: "0 8px 24px rgba(20,20,25,.08)", display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 42, height: 42, borderRadius: 12, background: C.grad, display: "grid", placeItems: "center", color: "#201700", fontWeight: 800, fontSize: 18, flexShrink: 0 }}>
+                  {identity.name.charAt(0).toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute }}>PLAYING AS</div>
+                  <div style={{ fontSize: 17, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{identity.name}</div>
+                  {identity.email && <div style={{ fontSize: 10.5, color: C.mute, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{identity.email}</div>}
+                </div>
+                <button className="wc-btn" onClick={signOut} style={{
+                  display: "inline-flex", alignItems: "center", gap: 5, background: "transparent", color: C.mute, border: `1px solid ${C.line}`, borderRadius: 10,
+                  padding: "8px 12px", fontWeight: 700, fontSize: 12.5, cursor: "pointer", flexShrink: 0,
+                }}><LogOut size={14} /> Sign out</button>
+              </div>
+            ) : (
+              <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${nameError ? C.coral : C.line}`, borderRadius: 18, padding: 16, marginBottom: 16, boxShadow: "0 8px 24px rgba(20,20,25,.08)" }}>
+                <label style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute }}>CHOOSE A UNIQUE NAME</label>
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <input value={name} onChange={(e) => { setName(e.target.value); setNameError(""); }}
+                    placeholder="e.g. Nolan"
+                    onKeyDown={(e) => e.key === "Enter" && commitName()}
+                    style={{
+                      flex: 1, background: C.panel2, border: `1px solid ${nameError ? C.coral : C.line}`, borderRadius: 12,
+                      padding: "11px 12px", color: C.text, fontSize: 15, fontWeight: 600,
+                    }} />
+                  <button className="wc-btn" onClick={commitName} disabled={!name.trim()} style={{
+                    background: name.trim() ? C.grad : C.panel2, color: name.trim() ? "#201700" : C.mute,
+                    border: "none", borderRadius: 12, padding: "0 18px", fontWeight: 800, fontSize: 14,
+                    cursor: name.trim() ? "pointer" : "default",
+                    boxShadow: name.trim() ? GRAD_SHADOW : "none",
+                  }}>Go</button>
+                </div>
+                {nameError ? (
+                  <p style={{ fontSize: 12, color: C.coral, marginTop: 8, marginBottom: 0, fontWeight: 700 }}>{nameError}</p>
+                ) : (
+                  <p style={{ fontSize: 11.5, color: C.mute, marginTop: 8, marginBottom: 0 }}>
+                    Names are globally unique and tied to your account, so you can sign in and edit your picks from any device.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {committed && identity && (
+              <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 16, marginBottom: 16, boxShadow: "0 8px 24px rgba(20,20,25,.08)" }}>
+                {identity.groupCode ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ width: 42, height: 42, borderRadius: 12, background: "rgba(91,200,255,.14)", border: `1px solid rgba(91,200,255,.4)`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                      <Users size={20} color={C.blue} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute }}>YOUR LEAGUE</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{identity.groupName || "League"}</div>
+                    </div>
+                    <button className="wc-btn" onClick={() => copyCode(identity.groupCode)} style={{
+                      display: "inline-flex", alignItems: "center", gap: 7, background: "rgba(91,200,255,.1)", border: `1px solid rgba(91,200,255,.4)`,
+                      borderRadius: 10, padding: "8px 12px", cursor: "pointer", flexShrink: 0,
+                    }}>
+                      <span className="wc-mono" style={{ fontSize: 16, fontWeight: 700, letterSpacing: ".18em", color: C.blue }}>{identity.groupCode}</span>
+                      <Copy size={14} color={C.blue} />
+                    </button>
+                    <button className="wc-btn" onClick={leaveLeague} style={{
+                      background: "transparent", color: C.mute, border: `1px solid ${C.line}`, borderRadius: 10,
+                      padding: "8px 12px", fontWeight: 700, fontSize: 12.5, cursor: "pointer", flexShrink: 0,
+                    }}>Leave</button>
+                    <p style={{ width: "100%", fontSize: 11.5, color: C.mute, margin: "2px 0 0" }}>
+                      Share this code so friends can join. You're also ranked on the global board.
+                    </p>
+                  </div>
+                ) : leagueMode === "none" ? (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Users size={16} color={C.blue} />
+                      <span style={{ fontWeight: 800, fontSize: 14 }}>Play in a private league</span>
+                    </div>
+                    <p style={{ fontSize: 12, color: C.mute, margin: "6px 0 12px" }}>
+                      Compete head-to-head with just your crew — or skip it and battle the whole world. You'll be on the global board either way.
+                    </p>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button className="wc-btn" onClick={() => { setLeagueMode("create"); setLeagueError(""); }} style={{
+                        flex: 1, background: C.grad, color: "#201700", border: "none", borderRadius: 12, padding: "11px",
+                        fontWeight: 800, fontSize: 13.5, cursor: "pointer", boxShadow: GRAD_SHADOW,
+                      }}>Create a league</button>
+                      <button className="wc-btn" onClick={() => { setLeagueMode("join"); setLeagueError(""); }} style={{
+                        flex: 1, background: "transparent", color: C.text, border: `1px solid ${C.line}`, borderRadius: 12, padding: "11px",
+                        fontWeight: 800, fontSize: 13.5, cursor: "pointer",
+                      }}>Join with code</button>
+                    </div>
+                  </div>
+                ) : leagueMode === "create" ? (
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute }}>NAME YOUR LEAGUE</label>
+                    <input value={leagueNameInput} onChange={(e) => setLeagueNameInput(e.target.value)}
+                      placeholder="e.g. The Office Cup" onKeyDown={(e) => e.key === "Enter" && createLeague()}
+                      style={{ width: "100%", marginTop: 8, background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 12, padding: "11px 12px", color: C.text, fontSize: 15, fontWeight: 600 }} />
+                    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                      <button className="wc-btn" onClick={createLeague} style={{ flex: 1, background: C.grad, color: "#201700", border: "none", borderRadius: 12, padding: "11px", fontWeight: 800, fontSize: 13.5, cursor: "pointer", boxShadow: GRAD_SHADOW }}>Create & get code</button>
+                      <button className="wc-btn" onClick={() => setLeagueMode("none")} style={{ background: "transparent", color: C.mute, border: `1px solid ${C.line}`, borderRadius: 12, padding: "11px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute }}>ENTER LEAGUE CODE</label>
+                    <input value={leagueCodeInput} onChange={(e) => { setLeagueCodeInput(e.target.value.toUpperCase()); setLeagueError(""); }}
+                      placeholder="e.g. K7P3M" maxLength={6} onKeyDown={(e) => e.key === "Enter" && joinLeague()}
+                      style={{ width: "100%", marginTop: 8, background: C.panel2, border: `1px solid ${leagueError ? C.coral : C.line}`, borderRadius: 12, padding: "11px 12px", color: C.text, fontSize: 17, fontWeight: 700, letterSpacing: ".22em", fontFamily: "'Space Mono', monospace" }} />
+                    {leagueError && <p style={{ fontSize: 12, color: C.coral, margin: "8px 0 0", fontWeight: 700 }}>{leagueError}</p>}
+                    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                      <button className="wc-btn" onClick={joinLeague} style={{ flex: 1, background: C.grad, color: "#201700", border: "none", borderRadius: 12, padding: "11px", fontWeight: 800, fontSize: 13.5, cursor: "pointer", boxShadow: GRAD_SHADOW }}>Join league</button>
+                      <button className="wc-btn" onClick={() => setLeagueMode("none")} style={{ background: "transparent", color: C.mute, border: `1px solid ${C.line}`, borderRadius: 12, padding: "11px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {committed && <PhaseToggle phase={phase} setPhase={setPhase} koLocked={!knockout?.open} />}
+
+            {(!committed || phase === "group") && (
+              <>
+                {committed && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, color: C.mute, fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>
+                    <GripVertical size={15} style={{ color: C.green }} />
+                    Drag the handle on the right of each team to its finishing position.
+                  </div>
+                )}
+                <div style={{ position: "relative" }}>
+                  {!committed && (
+                    <div style={{
+                      position: "absolute", inset: 0, zIndex: 5, display: "grid", placeItems: "center",
+                      background: "rgba(251,250,247,.78)", backdropFilter: "blur(2px)", borderRadius: 16, textAlign: "center",
+                    }}>
+                      <div style={{ color: C.mute, fontWeight: 700, fontSize: 14, padding: 20 }}>
+                        ☝️ Enter your name to start ranking
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, opacity: committed ? 1 : .45 }}>
+                    {GROUP_KEYS.map((gk) => (
+                      <GroupCard key={gk} gk={gk} order={picks[gk]} onReorder={reorderGroup} editable={committed} />
+                    ))}
+                  </div>
+                </div>
+
+                {committed && (
+                  <button className="wc-btn" onClick={submit} style={{
+                    width: "100%", marginTop: 18, background: C.grad, color: "#201700", border: "none",
+                    borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: GRAD_SHADOW,
+                  }}><Save size={18} /> Save my predictions</button>
+                )}
+              </>
+            )}
+
+            {committed && phase === "knockout" && (
+              <>
+                {knockout?.open ? (
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, color: C.mute, fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>
+                      <Trophy size={15} style={{ color: C.gold }} />
+                      Tap teams to advance them through each round, down to your champion.
+                    </div>
+                    <KnockoutBoard pool={koPool} ko={koPicks} onToggle={toggleKoPick} editable />
+                    {koPool.length >= 32 && (
+                      <button className="wc-btn" onClick={submit} style={{
+                        width: "100%", marginTop: 18, background: C.grad, color: "#201700", border: "none",
+                        borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: "pointer",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: GRAD_SHADOW,
+                      }}><Save size={18} /> Save my knockout picks</button>
+                    )}
+                  </>
+                ) : (
+                  <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 20, textAlign: "center", color: C.mute }}>
+                    <Lock size={26} style={{ margin: "0 auto", opacity: .7 }} />
+                    <p style={{ marginTop: 10, fontSize: 13.5, fontWeight: 600 }}>
+                      Knockout predictions open once the group stage wraps up and the host launches the bracket. Your group-stage points carry over.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ---------------- LEADERBOARD ---------------- */}
+        {view === "board" && (
+          <div className="wc-fade">
+            <TrackerCard teamsLeft={teamsLeft} matchesLeft={matchesLeft} matchesPlayed={matchesPlayed} stageLabel={stageLabel} survivors={survivors} />
+
+            {inLeague ? (
+              <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: "rgba(20,20,25,.055)", border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 14 }}>
+                {[["league", identity.groupName || "My League", Users], ["global", "Global", Flag]].map(([id, label, Icon]) => {
+                  const active = scope === id;
+                  return (
+                    <button key={id} className="wc-btn" onClick={() => setScope(id)} style={{
+                      flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      padding: "10px 8px", borderRadius: 12, border: "none", cursor: "pointer", fontWeight: 800, fontSize: 13,
+                      background: active ? C.grad : "transparent", color: active ? "#201700" : C.mute,
+                      boxShadow: active ? GRAD_SHADOW : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}><Icon size={14} /> {label}</button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 13px", borderRadius: 12, background: "rgba(91,200,255,.06)", border: `1px solid ${C.line}`, marginBottom: 14 }}>
+                <Flag size={15} color={C.blue} style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: 12.5, color: C.mute, fontWeight: 600 }}>
+                  <b style={{ color: C.text }}>Global leaderboard.</b> Create or join a private league in the Predict tab to battle just your crew.
+                </span>
+              </div>
+            )}
+
+            {useLeague && (
+              <div className="wc-glass" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: C.panel, border: `1px solid rgba(91,200,255,.3)`, borderRadius: 14, marginBottom: 14 }}>
+                <Users size={18} color={C.blue} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{identity.groupName || "League"}</div>
+                  <div style={{ fontSize: 11.5, color: C.mute }}>Private league · ranked among friends</div>
+                </div>
+                <button className="wc-btn" onClick={() => copyCode(identity.groupCode)} style={{
+                  display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(91,200,255,.1)", border: `1px solid rgba(91,200,255,.4)`,
+                  borderRadius: 10, padding: "7px 11px", cursor: "pointer", flexShrink: 0,
+                }}>
+                  <span className="wc-mono" style={{ fontSize: 15, fontWeight: 700, letterSpacing: ".16em", color: C.blue }}>{identity.groupCode}</span>
+                  <Copy size={13} color={C.blue} />
+                </button>
+              </div>
+            )}
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, color: C.mute, fontSize: 13, fontWeight: 700, flexWrap: "wrap" }}>
+              <Users size={16} /> {scopedPreds.length} {scopedPreds.length === 1 ? "entry" : "entries"}
+              <span style={{ marginLeft: "auto", color: finalGroups.length ? C.gold : C.mute }}>
+                {finalGroups.length}/12 groups final
+              </span>
+              {koScoredRounds.length > 0 && (
+                <span style={{ color: C.green }}>· KO: {koScoredRounds.map((r) => r.label.replace("Round of ", "R")).join(", ")}</span>
+              )}
+            </div>
+
+            {scopedPreds.length === 0 && (
+              <Empty icon={Trophy} text={useLeague ? "No one in this league yet. Share your code to fill it up." : "No predictions yet. Be the first in the Predict tab."} />
+            )}
+
+            {scopedPreds.length > 0 && finalGroups.length === 0 && (
+              <>
+                <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
+                  <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>Scores unlock after kickoff ⚽</div>
+                  <p style={{ color: C.mute, fontSize: 13, margin: 0 }}>
+                    Once the host marks group results as final (Results tab), the table ranks everyone automatically. Meanwhile, here's where the {useLeague ? "league" : "pool"} is leaning:
+                  </p>
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute, marginBottom: 10 }}>PICK TO WIN EACH GROUP</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {consensus.map((c) => (
+                    <div key={c.gk} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: 11 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                        <span className="wc-display" style={{ fontSize: 18 }}>{c.gk}</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                        <span style={{ fontSize: 18 }}>{c.team ? FLAG[c.team] : "—"}</span>
+                        <span style={{ fontWeight: 700, fontSize: 13 }}>{c.team || "—"}</span>
+                      </div>
+                      {c.team && <div className="wc-mono" style={{ fontSize: 10.5, color: C.green, marginTop: 3 }}>{c.votes}/{scopedPreds.length} picks</div>}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 18, fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute, marginBottom: 8 }}>WHO'S IN</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {scopedPreds.map((p) => (
+                    <span key={p.slug} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 999, padding: "6px 12px", fontWeight: 700, fontSize: 13 }}>{p.name}</span>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {finalGroups.length > 0 && scopedStandings.map((p, i) => (
+              <LeaderRow key={p.slug} p={p} rank={i + 1} finalGroups={finalGroups} koScoredRounds={koScoredRounds} />
+            ))}
+          </div>
+        )}
+
+        {/* ---------------- RESULTS (admin) ---------------- */}
+        {view === "results" && (
+          <div className="wc-fade">
+            {!adminUnlocked ? (
+              <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 20, textAlign: "center" }}>
+                <ShieldCheck size={30} color={C.gold} style={{ margin: "0 auto" }} />
+                <div style={{ fontWeight: 800, fontSize: 16, marginTop: 10 }}>Host / scorekeeper area</div>
+                <p style={{ color: C.mute, fontSize: 13, maxWidth: 360, margin: "8px auto 16px" }}>
+                  Enter the real final standings here as groups wrap up. Mark a group <b>Final</b> to count it toward everyone's score. Changes affect the whole pool.
+                </p>
+                <button className="wc-btn" onClick={() => setAdminUnlocked(true)} style={{
+                  background: C.gold, color: "#1a1500", border: "none", borderRadius: 10, padding: "12px 22px",
+                  fontWeight: 800, fontSize: 14, cursor: "pointer",
+                }}>I'm the scorekeeper →</button>
+              </div>
+            ) : (
+              <>
+                <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 16, marginBottom: 16, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 38, height: 38, borderRadius: 11, background: "rgba(232,184,75,.14)", border: `1px solid ${C.gold}`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                      <Zap size={18} color={C.gold} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 800, fontSize: 14 }}>Auto-sync live results</div>
+                      <div style={{ fontSize: 11.5, color: C.mute }}>Pulls current standings &amp; knockout outcomes from the web.</div>
+                    </div>
+                    <button className="wc-btn" onClick={autoSync} disabled={syncing} style={{
+                      display: "inline-flex", alignItems: "center", gap: 7, background: C.grad, color: "#201700", border: "none",
+                      borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: syncing ? "default" : "pointer",
+                      boxShadow: GRAD_SHADOW, opacity: syncing ? .7 : 1, flexShrink: 0,
+                    }}>
+                      <RefreshCw size={15} className={syncing ? "wc-spin" : ""} />{syncing ? "Syncing…" : "Sync now"}
+                    </button>
+                  </div>
+                  {syncMsg && <p style={{ fontSize: 12, color: C.mute, margin: "10px 0 0", fontWeight: 600 }}>{syncMsg}</p>}
+                  {lastSync && <p style={{ fontSize: 10.5, color: C.mute, margin: "4px 0 0", opacity: .8 }}>Last synced {new Date(lastSync).toLocaleTimeString()}</p>}
+                  <p style={{ fontSize: 10.5, color: C.mute, margin: "8px 0 0", opacity: .8 }}>
+                    Best-effort from public sources — double-check below and tweak anything that looks off.
+                  </p>
+                </div>
+
+                <PhaseToggle phase={phase} setPhase={setPhase} koLocked={false} />
+
+                {phase === "group" && (
+                  <>
+                    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-start" }}>
+                      <Info size={16} color={C.gold} style={{ flexShrink: 0, marginTop: 2 }} />
+                      <p style={{ margin: 0, fontSize: 12.5, color: C.mute }}>
+                        Reorder each group to the actual finishing positions, toggle <b>Final</b>, then Save. Only groups marked Final are scored — so you can update as the tournament unfolds.
+                      </p>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                      {GROUP_KEYS.map((gk) => (
+                        <GroupCard key={gk} gk={gk} order={resultsDraft[gk].order} onReorder={reorderResult} editable
+                          headerRight={
+                            <button className="wc-btn" onClick={() => setResultsDraft((d) => ({ ...d, [gk]: { ...d[gk], final: !d[gk].final } }))}
+                              style={{
+                                display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 800,
+                                padding: "6px 10px", borderRadius: 999, cursor: "pointer",
+                                border: `1px solid ${resultsDraft[gk].final ? C.green : C.line}`,
+                                background: resultsDraft[gk].final ? "rgba(232,184,75,.12)" : "transparent",
+                                color: resultsDraft[gk].final ? C.green : C.mute,
+                              }}>
+                              {resultsDraft[gk].final ? <Lock size={13} /> : <Unlock size={13} />}
+                              {resultsDraft[gk].final ? "Final" : "Mark final"}
+                            </button>
+                          } />
+                      ))}
+                    </div>
+                    <button className="wc-btn" onClick={saveResults} style={{
+                      width: "100%", marginTop: 18, background: C.grad, color: "#201700", border: "none",
+                      borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: GRAD_SHADOW,
+                    }}><Save size={18} /> Save results & score the pool</button>
+                  </>
+                )}
+
+                {phase === "knockout" && (
+                  <>
+                    {!allGroupsFinal ? (
+                      <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 20, textAlign: "center", color: C.mute }}>
+                        <Lock size={26} style={{ margin: "0 auto", opacity: .7 }} />
+                        <p style={{ marginTop: 10, fontSize: 13.5, fontWeight: 600 }}>
+                          Mark all 12 groups <b>Final</b> on the Group Stage tab first. Then set up the knockout bracket here.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Step 1: pick the 8 qualifying third-place teams */}
+                        <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 16, marginBottom: 14 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                            <span className="wc-display" style={{ fontSize: 18 }}>1. Best third-place teams</span>
+                            <span className="wc-mono" style={{ marginLeft: "auto", fontSize: 13, fontWeight: 700, color: koDraft.thirds.length === 8 ? C.green : C.gold }}>{koDraft.thirds.length}/8</span>
+                          </div>
+                          <p style={{ fontSize: 12, color: C.mute, margin: "0 0 12px" }}>
+                            8 of the 12 third-place teams advance. Select the 8 that qualified.
+                          </p>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                            {thirdTeams.map((team, idx) => {
+                              const on = koDraft.thirds.includes(team);
+                              const full = !on && koDraft.thirds.length >= 8;
+                              return (
+                                <button key={team} className="wc-btn" disabled={full} onClick={() => toggleThird(team)} style={{
+                                  display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 12px", borderRadius: 999,
+                                  fontSize: 13, fontWeight: 700, cursor: full ? "default" : "pointer",
+                                  border: `1px solid ${on ? C.gold : C.line}`,
+                                  background: on ? C.gold : "rgba(20,20,25,.045)",
+                                  color: on ? "#1a1500" : (full ? "rgba(139,157,150,.5)" : C.text), opacity: full ? .5 : 1,
+                                }}>
+                                  <span style={{ fontSize: 10, fontWeight: 800, opacity: .7 }}>{GROUP_KEYS[idx]}</span>
+                                  <span style={{ fontSize: 15 }}>{FLAG[team] || "🏳️"}</span>{team}
+                                  {on && <Check size={13} />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Step 2: open predictions */}
+                        <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 16, marginBottom: 14, display: "flex", alignItems: "center", gap: 12 }}>
+                          <div style={{ flex: 1 }}>
+                            <div className="wc-display" style={{ fontSize: 18 }}>2. Open predictions</div>
+                            <p style={{ fontSize: 12, color: C.mute, margin: "2px 0 0" }}>Let everyone make their knockout picks.</p>
+                          </div>
+                          <button className="wc-btn" disabled={koDraft.thirds.length !== 8}
+                            onClick={() => setKoDraft((d) => ({ ...d, open: !d.open }))} style={{
+                              display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 800,
+                              padding: "9px 14px", borderRadius: 999, cursor: koDraft.thirds.length === 8 ? "pointer" : "default",
+                              border: `1px solid ${koDraft.open ? C.green : C.line}`,
+                              background: koDraft.open ? "rgba(232,184,75,.12)" : "transparent",
+                              color: koDraft.open ? C.green : C.mute, opacity: koDraft.thirds.length === 8 ? 1 : .5,
+                            }}>{koDraft.open ? <Unlock size={14} /> : <Lock size={14} />}{koDraft.open ? "Open" : "Closed"}</button>
+                        </div>
+
+                        {/* Step 3: actual results */}
+                        <div style={{ marginBottom: 12 }}>
+                          <div className="wc-display" style={{ fontSize: 18, marginBottom: 2 }}>3. Actual results</div>
+                          <p style={{ fontSize: 12, color: C.mute, margin: 0 }}>Tap the teams that actually advanced, then mark each round <b>Official</b> to score it.</p>
+                        </div>
+                        <KnockoutBoard pool={koPoolDraft} ko={koDraft.actual} onToggle={toggleKoActual} editable
+                          showFinals finals={koDraft.finals} onToggleFinal={toggleKoFinal} />
+
+                        <button className="wc-btn" onClick={saveKnockout} style={{
+                          width: "100%", marginTop: 18, background: C.grad, color: "#201700", border: "none",
+                          borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: GRAD_SHADOW,
+                        }}><Save size={18} /> Save knockout & score the pool</button>
+                      </>
+                    )}
+                  </>
+                )}
+                <button className="wc-btn" onClick={resetAll} style={{
+                  width: "100%", marginTop: 10, background: "transparent", color: C.coral, border: `1px solid ${C.line}`,
+                  borderRadius: 12, padding: "12px", fontWeight: 700, fontSize: 13, cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                }}><RotateCcw size={15} /> Reset entire pool</button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ---------------- BRACKET ---------------- */}
+        {view === "bracket" && (
+          <BracketView koPool={koPool} actual={koActual} finals={koFinals} myPicks={koPicks} koOpen={!!knockout?.open} />
+        )}
+        </>
+        )}
+      </main>
+
+      {/* Scoring modal */}
+      {showScoring && (
+        <div onClick={() => setShowScoring(false)} style={{
+          position: "fixed", inset: 0, zIndex: 60, background: "rgba(26,23,18,.42)",
+          display: "grid", placeItems: "center", padding: 16,
+        }}>
+          <div className="wc-pop wc-glass" onClick={(e) => e.stopPropagation()} style={{
+            background: "rgba(255,255,255,.97)", border: `1px solid ${C.line}`, borderRadius: 22, padding: 22, maxWidth: 440, width: "100%",
+            boxShadow: "0 30px 80px rgba(20,20,25,.18)",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h2 className="wc-display" style={{ fontSize: 26, margin: 0 }}>SCORING</h2>
+              <button className="wc-btn" onClick={() => setShowScoring(false)} style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 8, padding: 6, color: C.text, cursor: "pointer" }}><X size={18} /></button>
+            </div>
+            <p style={{ color: C.mute, fontSize: 13, marginTop: 0 }}>Points are awarded per group based on your predicted final order vs the real standings:</p>
+            <ScoreLine icon={Medal} color={C.green} pts={`+${PTS_EXACT}`} label="Each team in its exact finishing position" sub="Any of the 4 spots — spot on (max +12)" />
+            <ScoreLine icon={ShieldCheck} color={C.blue} pts={`+${PTS_QUALIFIERS}`} label="Both top-2 teams correct" sub="Your two qualifiers, any order" />
+            <ScoreLine icon={Crown} color={C.gold} pts={`+${PTS_PERFECT}`} label="All 4 positions perfectly correct" sub="Bonus for nailing the whole group" />
+            <div style={{ marginTop: 14, padding: 12, background: C.panel2, borderRadius: 10, border: `1px solid ${C.line}` }}>
+              <div className="wc-mono" style={{ fontSize: 13, color: C.gold, fontWeight: 700 }}>Group stage — max 17 / group · 204 total</div>
+              <p style={{ fontSize: 12, color: C.mute, margin: "6px 0 0" }}>
+                A perfect group is 12 (exact spots) + 2 (top-2) + 3 (perfect bonus) = 17. Only groups marked <b>Final</b> are counted.
+              </p>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "20px 0 6px" }}>
+              <Trophy size={16} color={C.gold} />
+              <h3 className="wc-display" style={{ fontSize: 18, margin: 0 }}>Knockout stage</h3>
+            </div>
+            <p style={{ color: C.mute, fontSize: 13, marginTop: 0 }}>Group points carry over. You then pick who survives each round — points per team that actually reaches it:</p>
+            {KO_ROUNDS.map((r) => (
+              <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: `1px solid ${C.line}` }}>
+                <span style={{ width: 10, height: 10, borderRadius: 3, background: r.color, flexShrink: 0 }} />
+                <div style={{ flex: 1, fontWeight: 700, fontSize: 14 }}>{r.label}<span style={{ color: C.mute, fontWeight: 600 }}> · {r.count} {r.count === 1 ? "team" : "teams"}</span></div>
+                <div className="wc-mono" style={{ fontWeight: 700, fontSize: 16, color: r.color }}>+{r.pts}</div>
+              </div>
+            ))}
+            <div style={{ marginTop: 12, padding: 12, background: C.panel2, borderRadius: 10, border: `1px solid ${C.line}` }}>
+              <div className="wc-mono" style={{ fontSize: 13, color: C.gold, fontWeight: 700 }}>Knockout — {KO_MAX} max · {204 + KO_MAX} grand total</div>
+              <p style={{ fontSize: 12, color: C.mute, margin: "6px 0 0" }}>
+                Each knockout round scores only after the host marks it <b>Official</b>.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className="wc-pop" style={{
+          position: "fixed", bottom: 22, left: "50%", transform: "translateX(-50%)", zIndex: 70,
+          background: C.text, color: C.bg, padding: "12px 20px", borderRadius: 999, fontWeight: 800,
+          fontSize: 14, boxShadow: "0 8px 30px rgba(20,20,25,.16)", whiteSpace: "nowrap",
+        }}>{toast}</div>
+      )}
+
+      {!storageReady && (
+        <div style={{ position: "fixed", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 80, fontSize: 11, color: C.coral, background: C.panel, padding: "4px 10px", borderRadius: 8, border: `1px solid ${C.line}` }}>
+          Add your Supabase keys to .env to enable shared data &amp; leaderboards
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScoreLine({ icon: Icon, color, pts, label, sub }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: `1px solid ${C.line}` }}>
+      <div style={{ width: 38, height: 38, borderRadius: 10, display: "grid", placeItems: "center", background: "rgba(20,20,25,.055)", border: `1px solid ${C.line}`, flexShrink: 0 }}>
+        <Icon size={18} color={color} />
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>{label}</div>
+        <div style={{ fontSize: 12, color: C.mute }}>{sub}</div>
+      </div>
+      <div className="wc-mono" style={{ fontWeight: 700, fontSize: 18, color }}>{pts}</div>
+    </div>
+  );
+}
+
+function Empty({ icon: Icon, text }) {
+  return (
+    <div style={{ textAlign: "center", padding: "50px 20px", color: C.mute }}>
+      <Icon size={34} style={{ margin: "0 auto", opacity: .6 }} />
+      <p style={{ marginTop: 12, fontSize: 14, fontWeight: 600 }}>{text}</p>
+    </div>
+  );
+}
+
+function LeaderRow({ p, rank, finalGroups, koScoredRounds }) {
+  const [open, setOpen] = useState(false);
+  const medal = rank === 1 ? C.gold : rank === 2 ? "#9AA0A6" : rank === 3 ? "#CD7F4A" : C.mute;
+  const hasKo = koScoredRounds.length > 0;
+  return (
+    <div className="wc-fade wc-glass" style={{ background: C.panel, border: `1px solid ${rank === 1 ? C.gold : C.line}`, borderRadius: 18, marginBottom: 10, overflow: "hidden", boxShadow: rank === 1 ? "0 10px 30px rgba(232,184,75,.14)" : "0 6px 18px rgba(20,20,25,.08)" }}>
+      <button className="wc-btn" onClick={() => setOpen((o) => !o)} style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "14px 14px",
+        background: "transparent", border: "none", cursor: "pointer", color: C.text, textAlign: "left",
+      }}>
+        <div className="wc-display" style={{ fontSize: 26, width: 34, textAlign: "center", color: medal }}>{rank}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 16 }}>{p.name}</div>
+          <div style={{ fontSize: 11.5, color: C.mute }}>
+            {hasKo ? <>Group {p.groupPts} · Knockout {p.koPts}</> : <>{open ? "Hide" : "Tap for"} group breakdown</>}
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div className="wc-mono" style={{ fontSize: 24, fontWeight: 700, color: rank === 1 ? C.gold : C.green, lineHeight: 1 }}>{p.total}</div>
+          <div style={{ fontSize: 10.5, color: C.mute, fontWeight: 700 }}>POINTS</div>
+        </div>
+      </button>
+      {open && (
+        <div style={{ padding: "0 14px 14px" }}>
+          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", color: C.mute, margin: "0 0 6px" }}>GROUPS</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 6 }}>
+            {finalGroups.map((k) => (
+              <div key={k} style={{ background: C.panel2, borderRadius: 8, padding: "7px 4px", textAlign: "center", border: `1px solid ${C.line}` }}>
+                <div className="wc-display" style={{ fontSize: 14, color: C.mute }}>{k}</div>
+                <div className="wc-mono" style={{ fontSize: 14, fontWeight: 700, color: p.per[k] > 0 ? C.green : C.mute }}>{p.per[k]}</div>
+              </div>
+            ))}
+          </div>
+          {hasKo && (
+            <>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", color: C.mute, margin: "12px 0 6px" }}>KNOCKOUT</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {koScoredRounds.map((r) => (
+                  <div key={r.key} style={{ background: C.panel2, borderRadius: 8, padding: "6px 10px", border: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 2, background: r.color }} />
+                    <span style={{ fontSize: 11.5, fontWeight: 700, color: C.mute }}>{r.label}</span>
+                    <span className="wc-mono" style={{ fontSize: 13, fontWeight: 700, color: (p.koPer?.[r.key] || 0) > 0 ? C.green : C.mute }}>{p.koPer?.[r.key] || 0}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
