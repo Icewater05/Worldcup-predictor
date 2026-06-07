@@ -3,7 +3,7 @@ import {
   GripVertical, Trophy, Check, Users, Save, Info, Copy, RefreshCw, Zap,
   X, Lock, Unlock, Crown, ShieldCheck, RotateCcw, Medal, Flag,
   LogOut, Mail, GitBranch
-} from "lucide-react";
+} from "lucide-react"; 
 
 /* ----------------------------- DATA ----------------------------- */
 // Official 2026 World Cup groups, listed in seeded (pot) order.
