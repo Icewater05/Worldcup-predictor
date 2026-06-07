@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   GripVertical, Trophy, Check, Users, Save, Info, Copy, RefreshCw, Zap,
   X, Lock, Unlock, Crown, ShieldCheck, RotateCcw, Medal, Flag,
-  LogOut, Mail, GitBranch
-} from "lucide-react";  
+  LogOut, Mail, GitBranch, Pencil, ChevronUp, ChevronDown
+} from "lucide-react";
 
 /* ----------------------------- DATA ----------------------------- */
 // Official 2026 World Cup groups, listed in seeded (pot) order.
@@ -619,6 +619,10 @@ export default function App() {
   const [committed, setCommitted] = useState(false);
   const [identity, setIdentity] = useState(null); // { name, slug:uid, token:uid, uid, email, groupCode, groupName }
   const [nameError, setNameError] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [howOpen, setHowOpen] = useState(() => { try { return localStorage.getItem("wc26:howOpen") !== "0"; } catch { return true; } });
+  const toggleHow = () => setHowOpen((o) => { const n = !o; try { localStorage.setItem("wc26:howOpen", n ? "1" : "0"); } catch {} return n; });
   const [session, setSession] = useState(null);   // Supabase auth session (or null)
   const [authReady, setAuthReady] = useState(false);
   const [authMode, setAuthMode] = useState("signin"); // "signin" | "signup"
@@ -764,31 +768,34 @@ export default function App() {
   const reorderGroup = (gk, next) => setPicks((p) => ({ ...p, [gk]: next }));
   const reorderResult = (gk, next) => setResultsDraft((p) => ({ ...p, [gk]: { ...p[gk], order: next } }));
 
-  const commitName = async () => {
-    const nm = name.trim();
-    if (!nm || !identity?.uid) return;
+  const commitName = async (override) => {
+    const nm = (override ?? name).trim();
+    if (!nm || !identity?.uid) return false;
     setNameError("");
     if (supabase) {
       // name must be globally unique (case-insensitive), unless it's already mine
       const { data: taken } = await supabase
         .from("profiles").select("id").eq("name_lower", nm.toLowerCase()).neq("id", identity.uid).maybeSingle();
-      if (taken) { setNameError(`"${nm}" is already taken — choose a different name.`); return; }
+      if (taken) { setNameError(`"${nm}" is already taken — choose a different name.`); return false; }
       const { error } = await supabase.from("profiles").upsert(
         { id: identity.uid, name: nm, name_lower: nm.toLowerCase(), group_code: identity.groupCode || null },
         { onConflict: "id" }
       );
-      if (error) { setNameError(error.message.includes("duplicate") ? `"${nm}" is already taken — choose a different name.` : error.message); return; }
+      if (error) { setNameError(error.message.includes("duplicate") ? `"${nm}" is already taken — choose a different name.` : error.message); return false; }
     }
+    const wasCommitted = committed;
     const id = { ...identity, name: nm };
     setIdentity(id);
+    setName(nm);
     setCommitted(true);
-    // tag any existing prediction with the (possibly updated) name
+    // tag any existing prediction with the (possibly updated) name — keeps points & picks
     const pr = await store.get(PRED_PREFIX + identity.uid);
     if (pr?.value) {
       try { const rec = JSON.parse(pr.value); rec.name = nm; await store.set(PRED_PREFIX + identity.uid, JSON.stringify(rec)); } catch {}
     }
     await loadAll();
-    flash("Name locked in 🔒");
+    flash(wasCommitted ? "Name updated — your points & picks stay 🎯" : "Name locked in 🔒");
+    return true;
   };
 
   const submit = async () => {
@@ -1053,9 +1060,19 @@ export default function App() {
             ))}
           </div>
 
-          {/* how it works */}
-          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".18em", color: C.mute, margin: "20px 0 10px" }}>HOW IT WORKS</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {/* how it works (collapsible) */}
+          <button className="wc-btn" onClick={toggleHow} style={{
+            display: "flex", alignItems: "center", gap: 8, width: "100%", background: "transparent",
+            border: "none", cursor: "pointer", padding: "4px 0", color: C.mute, margin: "20px 0 0",
+          }}>
+            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".18em" }}>HOW IT WORKS</span>
+            <span style={{ flex: 1, height: 1, background: C.line }} />
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700, color: C.gold }}>
+              {howOpen ? <>Hide <ChevronUp size={15} /></> : <>Show <ChevronDown size={15} /></>}
+            </span>
+          </button>
+          <div style={{ overflow: "hidden", transition: "max-height .38s cubic-bezier(.2,.8,.2,1), opacity .3s", maxHeight: howOpen ? 700 : 0, opacity: howOpen ? 1 : 0 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
             {[
               { n: 1, icon: Flag, color: "#E8B84B", t: "Claim Your Name", d: "Lock in a one-of-a-kind handle. No duplicates, no impostors — your picks stay yours." },
               { n: 2, icon: GripVertical, color: "#6FB1EC", t: "Rank the Groups", d: "Drag teams into your predicted finishing order. Nail the table for max points." },
@@ -1073,6 +1090,7 @@ export default function App() {
                 <div style={{ fontSize: 11.5, color: C.mute, lineHeight: 1.45 }}>{c.d}</div>
               </div>
             ))}
+          </div>
           </div>
 
           {/* two-round note + CTAs */}
@@ -1137,19 +1155,48 @@ export default function App() {
         {view === "predict" && (
           <div>
             {committed && identity ? (
-              <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 16, marginBottom: 16, boxShadow: "0 8px 24px rgba(20,20,25,.08)", display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 42, height: 42, borderRadius: 12, background: C.grad, display: "grid", placeItems: "center", color: "#201700", fontWeight: 800, fontSize: 18, flexShrink: 0 }}>
-                  {identity.name.charAt(0).toUpperCase()}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute }}>PLAYING AS</div>
-                  <div style={{ fontSize: 17, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{identity.name}</div>
-                  {identity.email && <div style={{ fontSize: 10.5, color: C.mute, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{identity.email}</div>}
-                </div>
-                <button className="wc-btn" onClick={signOut} style={{
-                  display: "inline-flex", alignItems: "center", gap: 5, background: "transparent", color: C.mute, border: `1px solid ${C.line}`, borderRadius: 10,
-                  padding: "8px 12px", fontWeight: 700, fontSize: 12.5, cursor: "pointer", flexShrink: 0,
-                }}><LogOut size={14} /> Sign out</button>
+              <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 16, marginBottom: 16, boxShadow: "0 8px 24px rgba(20,20,25,.08)" }}>
+                {!editingName ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ width: 42, height: 42, borderRadius: 12, background: C.grad, display: "grid", placeItems: "center", color: "#201700", fontWeight: 800, fontSize: 18, flexShrink: 0 }}>
+                      {identity.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute }}>PLAYING AS</div>
+                      <div style={{ fontSize: 17, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{identity.name}</div>
+                      {identity.email && <div style={{ fontSize: 10.5, color: C.mute, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{identity.email}</div>}
+                    </div>
+                    <button className="wc-btn" onClick={() => { setNameDraft(identity.name); setNameError(""); setEditingName(true); }} style={{
+                      display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(232,184,75,.1)", color: C.gold, border: `1px solid ${C.gold}`, borderRadius: 10,
+                      padding: "8px 11px", fontWeight: 700, fontSize: 12.5, cursor: "pointer", flexShrink: 0,
+                    }}><Pencil size={13} /> Change name</button>
+                    <button className="wc-btn" onClick={signOut} style={{
+                      display: "inline-flex", alignItems: "center", gap: 5, background: "transparent", color: C.mute, border: `1px solid ${C.line}`, borderRadius: 10,
+                      padding: "8px 11px", fontWeight: 700, fontSize: 12.5, cursor: "pointer", flexShrink: 0,
+                    }}><LogOut size={14} /></button>
+                  </div>
+                ) : (
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute }}>NEW DISPLAY NAME</label>
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <input value={nameDraft} autoFocus maxLength={24}
+                        onChange={(e) => { setNameDraft(e.target.value); setNameError(""); }}
+                        onKeyDown={async (e) => { if (e.key === "Enter") { const ok = await commitName(nameDraft); if (ok) setEditingName(false); } }}
+                        style={{ flex: 1, background: C.panel2, border: `1px solid ${nameError ? C.coral : C.line}`, borderRadius: 12, padding: "11px 12px", color: C.text, fontSize: 15, fontWeight: 600 }} />
+                      <button className="wc-btn" onClick={async () => { const ok = await commitName(nameDraft); if (ok) setEditingName(false); }} style={{
+                        background: C.grad, color: "#201700", border: "none", borderRadius: 12, padding: "0 16px", fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: GRAD_SHADOW, display: "inline-flex", alignItems: "center", gap: 5,
+                      }}><Check size={16} /> Save</button>
+                      <button className="wc-btn" onClick={() => { setEditingName(false); setNameError(""); }} style={{
+                        background: "transparent", color: C.mute, border: `1px solid ${C.line}`, borderRadius: 12, padding: "0 12px", fontWeight: 700, fontSize: 13, cursor: "pointer",
+                      }}><X size={16} /></button>
+                    </div>
+                    {nameError ? (
+                      <p style={{ fontSize: 12, color: C.coral, fontWeight: 700, margin: "8px 0 0" }}>{nameError}</p>
+                    ) : (
+                      <p style={{ fontSize: 11.5, color: C.mute, margin: "8px 0 0" }}>Names are globally unique. Your points and picks stay with you.</p>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${nameError ? C.coral : C.line}`, borderRadius: 18, padding: 16, marginBottom: 16, boxShadow: "0 8px 24px rgba(20,20,25,.08)" }}>
