@@ -32,3 +32,18 @@ drop policy if exists "profiles read"  on profiles;
 drop policy if exists "profiles write" on profiles;
 create policy "profiles read"  on profiles for select to authenticated using (true);
 create policy "profiles write" on profiles for all    to authenticated using (id = auth.uid()) with check (id = auth.uid());
+
+-- ---------------------------------------------------------------------------
+-- OPTIONAL: hard-lock results to the host (recommended).
+-- The app already hides the Results tab from non-hosts, but that's only in the
+-- browser. To enforce it on the server too (so nobody can write results even
+-- with developer tools), run this — replacing the email with YOUR account email.
+-- The /api/sync function uses the service role and still bypasses this.
+--
+-- drop policy if exists "kv auth write" on kv;
+-- create policy "kv write predictions/leagues" on kv for all to authenticated
+--   using ( key not like 'wc26:results%' and key not like 'wc26:knockout%' )
+--   with check ( key not like 'wc26:results%' and key not like 'wc26:knockout%' );
+-- create policy "kv write results host only" on kv for all to authenticated
+--   using ( (auth.jwt() ->> 'email') = 'you@example.com' )
+--   with check ( (auth.jwt() ->> 'email') = 'you@example.com' );

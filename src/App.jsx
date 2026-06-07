@@ -147,6 +147,10 @@ const IDENTITY_KEY = "wc26:identity";
 const GROUP_PREFIX = "wc26:group:";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
 const genCode = () => Array.from({ length: 5 }, () => CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)]).join("");
+// Only these accounts can open the Results (host) tab. Set in .env / Vercel:
+//   VITE_ADMIN_EMAILS=you@example.com   (comma-separated for more than one)
+const ADMIN_EMAILS = ((import.meta.env && import.meta.env.VITE_ADMIN_EMAILS) || "")
+  .toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
 const slug = (n) => n.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "anon";
 const freshPicks = () => Object.fromEntries(GROUP_KEYS.map((k) => [k, [...GROUPS[k]]]));
 const newToken = () => {
@@ -630,7 +634,7 @@ export default function App() {
   const [allPreds, setAllPreds] = useState([]);
   const [toast, setToast] = useState(null);
   const [showScoring, setShowScoring] = useState(false);
-  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const isAdmin = !!session?.user?.email && ADMIN_EMAILS.includes(session.user.email.toLowerCase());
   const [phase, setPhase] = useState("group"); // "group" | "knockout"
   const [koPicks, setKoPicks] = useState(emptyKo); // this user's knockout picks
   const [knockout, setKnockout] = useState(null);  // shared: { open, thirds, actual, finals }
@@ -702,7 +706,6 @@ export default function App() {
     };
     setIdentity(id);
     setName(id.name);
-    if (id.groupCode) setScope("league");
     setCommitted(!!id.name);
     // load saved picks for this account
     const pr = await store.get(PRED_PREFIX + uid);
@@ -752,11 +755,11 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (view === "results" && adminUnlocked && !didAutoSync.current) {
+    if (view === "results" && isAdmin && !didAutoSync.current) {
       didAutoSync.current = true;
       autoSync();
     }
-  }, [view, adminUnlocked]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reorderGroup = (gk, next) => setPicks((p) => ({ ...p, [gk]: next }));
   const reorderResult = (gk, next) => setResultsDraft((p) => ({ ...p, [gk]: { ...p[gk], order: next } }));
@@ -1098,16 +1101,19 @@ export default function App() {
       {/* Tabs */}
       {session && (
       <nav className="wc-glass" style={{ display: "flex", gap: 5, padding: "8px 10px", position: "sticky", top: 0, zIndex: 20, background: "rgba(251,250,247,.78)", borderBottom: `1px solid ${C.line}` }}>
-        {[["predict", "Predict", Flag], ["board", "Board", Trophy], ["bracket", "Bracket", GitBranch], ["results", "Results", ShieldCheck]].map(([id, label, Icon]) => (
+        {[["predict", "Group Stage", Flag], ["bracket", "Knockout Stage", GitBranch], ["board", "Board", Trophy], ...(isAdmin ? [["results", "Results", ShieldCheck]] : [])].map(([id, label, Icon]) => {
+          const TabIcon = (id === "bracket" && !knockout?.open) ? Lock : Icon;
+          return (
           <button key={id} className="wc-tab wc-btn" onClick={() => setView(id)} style={{
-            flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-            padding: "11px 4px", borderRadius: 14, border: "none", cursor: "pointer",
-            fontWeight: 800, fontSize: 12.5,
+            flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+            padding: "11px 3px", borderRadius: 14, border: "none", cursor: "pointer",
+            fontWeight: 800, fontSize: 11, whiteSpace: "nowrap",
             background: view === id ? C.grad : "rgba(20,20,25,.055)",
             color: view === id ? "#201700" : C.mute,
             boxShadow: view === id ? GRAD_SHADOW : "none",
-          }}><Icon size={14} /> {label}</button>
-        ))}
+          }}><TabIcon size={13} style={{ flexShrink: 0 }} /> {label}</button>
+          );
+        })}
       </nav>
       )}
 
@@ -1246,70 +1252,36 @@ export default function App() {
               </div>
             )}
 
-            {committed && <PhaseToggle phase={phase} setPhase={setPhase} koLocked={!knockout?.open} />}
-
-            {(!committed || phase === "group") && (
-              <>
-                {committed && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 7, color: C.mute, fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>
-                    <GripVertical size={15} style={{ color: C.green }} />
-                    Drag the handle on the right of each team to its finishing position.
-                  </div>
-                )}
-                <div style={{ position: "relative" }}>
-                  {!committed && (
-                    <div style={{
-                      position: "absolute", inset: 0, zIndex: 5, display: "grid", placeItems: "center",
-                      background: "rgba(251,250,247,.78)", backdropFilter: "blur(2px)", borderRadius: 16, textAlign: "center",
-                    }}>
-                      <div style={{ color: C.mute, fontWeight: 700, fontSize: 14, padding: 20 }}>
-                        ☝️ Enter your name to start ranking
-                      </div>
-                    </div>
-                  )}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 14, opacity: committed ? 1 : .45 }}>
-                    {GROUP_KEYS.map((gk) => (
-                      <GroupCard key={gk} gk={gk} order={picks[gk]} onReorder={reorderGroup} editable={committed} />
-                    ))}
+            {committed && (
+              <div style={{ display: "flex", alignItems: "center", gap: 7, color: C.mute, fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>
+                <GripVertical size={15} style={{ color: C.green }} />
+                Drag the handle on the right of each team to its predicted finishing position.
+              </div>
+            )}
+            <div style={{ position: "relative" }}>
+              {!committed && (
+                <div style={{
+                  position: "absolute", inset: 0, zIndex: 5, display: "grid", placeItems: "center",
+                  background: "rgba(251,250,247,.78)", backdropFilter: "blur(2px)", borderRadius: 16, textAlign: "center",
+                }}>
+                  <div style={{ color: C.mute, fontWeight: 700, fontSize: 14, padding: 20 }}>
+                    ☝️ Enter your name to start ranking
                   </div>
                 </div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 14, opacity: committed ? 1 : .45 }}>
+                {GROUP_KEYS.map((gk) => (
+                  <GroupCard key={gk} gk={gk} order={picks[gk]} onReorder={reorderGroup} editable={committed} />
+                ))}
+              </div>
+            </div>
 
-                {committed && (
-                  <button className="wc-btn" onClick={submit} style={{
-                    width: "100%", marginTop: 18, background: C.grad, color: "#201700", border: "none",
-                    borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: GRAD_SHADOW,
-                  }}><Save size={18} /> Save my predictions</button>
-                )}
-              </>
-            )}
-
-            {committed && phase === "knockout" && (
-              <>
-                {knockout?.open ? (
-                  <>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7, color: C.mute, fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>
-                      <Trophy size={15} style={{ color: C.gold }} />
-                      Tap teams to advance them through each round, down to your champion.
-                    </div>
-                    <KnockoutBoard pool={koPool} ko={koPicks} onToggle={toggleKoPick} editable />
-                    {koPool.length >= 32 && (
-                      <button className="wc-btn" onClick={submit} style={{
-                        width: "100%", marginTop: 18, background: C.grad, color: "#201700", border: "none",
-                        borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: "pointer",
-                        display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: GRAD_SHADOW,
-                      }}><Save size={18} /> Save my knockout picks</button>
-                    )}
-                  </>
-                ) : (
-                  <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 20, textAlign: "center", color: C.mute }}>
-                    <Lock size={26} style={{ margin: "0 auto", opacity: .7 }} />
-                    <p style={{ marginTop: 10, fontSize: 13.5, fontWeight: 600 }}>
-                      Knockout predictions open once the group stage wraps up and the host launches the bracket. Your group-stage points carry over.
-                    </p>
-                  </div>
-                )}
-              </>
+            {committed && (
+              <button className="wc-btn" onClick={submit} style={{
+                width: "100%", marginTop: 18, background: C.grad, color: "#201700", border: "none",
+                borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: GRAD_SHADOW,
+              }}><Save size={18} /> Save my group picks</button>
             )}
           </div>
         )}
@@ -1317,11 +1289,36 @@ export default function App() {
         {/* ---------------- LEADERBOARD ---------------- */}
         {view === "board" && (
           <div className="wc-fade">
+            {scopedPreds.length > 0 && (
+              <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: "8px 6px 6px", marginBottom: 14, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".16em", color: C.mute, padding: "6px 12px 8px" }}>
+                  STANDINGS{useLeague ? " · " + (identity.groupName || "League") : ""}
+                </div>
+                {scopedStandings.map((p, i) => {
+                  const medal = i === 0 ? C.gold : i === 1 ? "#9AA0A6" : i === 2 ? "#CD7F4A" : C.mute;
+                  const me = identity && p.slug === identity.slug;
+                  return (
+                    <div key={p.slug} style={{
+                      display: "flex", alignItems: "center", gap: 12, padding: "10px 12px",
+                      borderTop: i ? `1px solid ${C.line}` : "none",
+                      background: me ? "rgba(232,184,75,.08)" : "transparent",
+                    }}>
+                      <span className="wc-mono" style={{ width: 20, textAlign: "center", fontWeight: 700, fontSize: 15, color: medal }}>{i + 1}</span>
+                      <span style={{ flex: 1, fontWeight: 700, fontSize: 15, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {p.name}{me ? " (you)" : ""}
+                      </span>
+                      <span className="wc-mono" style={{ fontWeight: 700, fontSize: 15, color: i === 0 ? C.gold : C.text }}>{p.total} pts</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             <TrackerCard teamsLeft={teamsLeft} matchesLeft={matchesLeft} matchesPlayed={matchesPlayed} stageLabel={stageLabel} survivors={survivors} />
 
             {inLeague ? (
               <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: "rgba(20,20,25,.055)", border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 14 }}>
-                {[["league", identity.groupName || "My League", Users], ["global", "Global", Flag]].map(([id, label, Icon]) => {
+                {[["global", "Global", Flag], ["league", identity.groupName || "My League", Users]].map(([id, label, Icon]) => {
                   const active = scope === id;
                   return (
                     <button key={id} className="wc-btn" onClick={() => setScope(id)} style={{
@@ -1414,17 +1411,13 @@ export default function App() {
         {/* ---------------- RESULTS (admin) ---------------- */}
         {view === "results" && (
           <div className="wc-fade">
-            {!adminUnlocked ? (
-              <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 20, textAlign: "center" }}>
-                <ShieldCheck size={30} color={C.gold} style={{ margin: "0 auto" }} />
-                <div style={{ fontWeight: 800, fontSize: 16, marginTop: 10 }}>Host / scorekeeper area</div>
-                <p style={{ color: C.mute, fontSize: 13, maxWidth: 360, margin: "8px auto 16px" }}>
-                  Enter the real final standings here as groups wrap up. Mark a group <b>Final</b> to count it toward everyone's score. Changes affect the whole pool.
+            {!isAdmin ? (
+              <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 24, textAlign: "center" }}>
+                <Lock size={30} color={C.gold} style={{ margin: "0 auto" }} />
+                <div style={{ fontWeight: 800, fontSize: 16, marginTop: 10 }}>Host only</div>
+                <p style={{ color: C.mute, fontSize: 13, maxWidth: 360, margin: "8px auto 0" }}>
+                  Only the pool host can enter or sync results, so nobody else can change the scores.
                 </p>
-                <button className="wc-btn" onClick={() => setAdminUnlocked(true)} style={{
-                  background: C.gold, color: "#1a1500", border: "none", borderRadius: 10, padding: "12px 22px",
-                  fontWeight: 800, fontSize: 14, cursor: "pointer",
-                }}>I'm the scorekeeper →</button>
               </div>
             ) : (
               <>
@@ -1574,7 +1567,43 @@ export default function App() {
 
         {/* ---------------- BRACKET ---------------- */}
         {view === "bracket" && (
-          <BracketView koPool={koPool} actual={koActual} finals={koFinals} myPicks={koPicks} koOpen={!!knockout?.open} />
+          <div className="wc-fade">
+            {!knockout?.open ? (
+              <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 24, textAlign: "center", color: C.mute }}>
+                <Lock size={28} style={{ margin: "0 auto", opacity: .7 }} />
+                <div style={{ fontWeight: 800, fontSize: 16, color: C.text, marginTop: 10 }}>Knockout stage locked</div>
+                <p style={{ marginTop: 8, fontSize: 13.5, fontWeight: 600, maxWidth: 360, marginLeft: "auto", marginRight: "auto" }}>
+                  This opens once the group stage wraps up and the host launches the bracket. Your group-stage points carry over.
+                </p>
+              </div>
+            ) : (
+              <>
+                {committed && identity ? (
+                  <div style={{ marginBottom: 22 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, color: C.mute, fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>
+                      <Trophy size={15} style={{ color: C.gold }} />
+                      Tap teams to advance them through each round, down to your champion.
+                    </div>
+                    <KnockoutBoard pool={koPool} ko={koPicks} onToggle={toggleKoPick} editable />
+                    {koPool.length >= 32 && (
+                      <button className="wc-btn" onClick={submit} style={{
+                        width: "100%", marginTop: 18, background: C.grad, color: "#201700", border: "none",
+                        borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: "pointer",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: GRAD_SHADOW,
+                      }}><Save size={18} /> Save my knockout picks</button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 18, marginBottom: 22, textAlign: "center", color: C.mute, fontSize: 13, fontWeight: 600 }}>
+                    Set your name on the Group Stage tab to make knockout picks.
+                  </div>
+                )}
+
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".16em", color: C.mute, margin: "4px 0 10px" }}>THE BRACKET</div>
+                <BracketView koPool={koPool} actual={koActual} finals={koFinals} myPicks={koPicks} koOpen={!!knockout?.open} />
+              </>
+            )}
+          </div>
         )}
         </>
         )}

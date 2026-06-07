@@ -45,8 +45,12 @@ saying shared data isn't connected — that's expected.
    - **Project URL** → `VITE_SUPABASE_URL` (and `SUPABASE_URL`)
    - **anon public** key → `VITE_SUPABASE_ANON_KEY`
    - **service_role** key → `SUPABASE_SERVICE_ROLE_KEY` (keep this secret)
-5. Put the two `VITE_` values in your local `.env`, then restart `npm run dev`.
-   The banner disappears and you can create an account and predict.
+6. Set the host: add `VITE_ADMIN_EMAILS=your@email` (the email you sign in with).
+   Only that account sees the **Results** tab and can enter/sync results —
+   everyone else just sees the Board, Bracket, and Predict tabs. For more than
+   one host, comma-separate the emails. (For true server-side enforcement, also
+   run the optional policy at the bottom of `supabase.sql`.)
+7. Put the `VITE_` values in your local `.env`, then restart `npm run dev`.
 
 > Accounts & names: players sign in with email + password. Display names are
 > globally unique (enforced by the database) and tied to the account, so anyone
