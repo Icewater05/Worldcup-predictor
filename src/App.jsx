@@ -1209,7 +1209,7 @@ export default function App() {
                       flex: 1, background: C.panel2, border: `1px solid ${nameError ? C.coral : C.line}`, borderRadius: 12,
                       padding: "11px 12px", color: C.text, fontSize: 15, fontWeight: 600,
                     }} />
-                  <button className="wc-btn" onClick={commitName} disabled={!name.trim()} style={{
+                  <button className="wc-btn" onClick={() => commitName()} disabled={!name.trim()} style={{
                     background: name.trim() ? C.grad : C.panel2, color: name.trim() ? "#201700" : C.mute,
                     border: "none", borderRadius: 12, padding: "0 18px", fontWeight: 800, fontSize: 14,
                     cursor: name.trim() ? "pointer" : "default",
@@ -1425,7 +1425,7 @@ export default function App() {
                     Once the host marks group results as final (Results tab), the table ranks everyone automatically. Meanwhile, here's where the {useLeague ? "league" : "pool"} is leaning:
                   </p>
                 </div>
-                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute, marginBottom: 10 }}>PICK TO WIN EACH GROUP</div>
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute, marginBottom: 10 }}>MOST POPULAR PICKS TO WIN EACH GROUP</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   {consensus.map((c) => (
                     <div key={c.gk} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: 11 }}>
