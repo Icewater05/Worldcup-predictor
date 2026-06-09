@@ -636,7 +636,7 @@ export default function App() {
   const [picks, setPicks] = useState(freshPicks);
   const [results, setResults] = useState(null);    // { A: {order, final}, ... }
   const [resultsDraft, setResultsDraft] = useState(() =>
-    Object.fromEntries(GROUP_KEYS.map((k) => [k, { order: [...GROUPS[k]], final: false }])));
+    Object.fromEntries(GROUP_KEYS.map((k) => [k, { order: [...GROUPS[k]], final: false, played: 0 }])));
   const [allPreds, setAllPreds] = useState([]);
   const [toast, setToast] = useState(null);
   const [showScoring, setShowScoring] = useState(false);
@@ -972,15 +972,21 @@ export default function App() {
     setResults(null);
     setKnockout(null);
     setKoDraft({ open: false, thirds: [], actual: emptyKo(), finals: {} });
-    setResultsDraft(Object.fromEntries(GROUP_KEYS.map((k) => [k, { order: [...GROUPS[k]], final: false }])));
+    setResultsDraft(Object.fromEntries(GROUP_KEYS.map((k) => [k, { order: [...GROUPS[k]], final: false, played: 0 }])));
     await loadAll();
     flash("Everything reset");
   };
 
   // ----- leaderboard math -----
   const finalGroups = results ? GROUP_KEYS.filter((k) => results[k]?.final && results[k].order?.length === 4) : [];
-  // groups with a current table available (final OR in-progress) — used for projections
-  const liveGroups = results ? GROUP_KEYS.filter((k) => results[k]?.order?.length === 4) : [];
+  // a group counts as "live" for projections once it's final or has at least
+  // one match played (set by the sync, or by the host's "played" control)
+  const isLiveGroup = (k) => {
+    const r = results?.[k];
+    if (!r?.order || r.order.length !== 4) return false;
+    return r.final || (r.played || 0) > 0;
+  };
+  const liveGroups = results ? GROUP_KEYS.filter(isLiveGroup) : [];
   const hasLive = liveGroups.some((k) => !results[k].final); // any provisional (non-final) standings
   const projecting = boardMode === "projected" && hasLive;    // effective mode
   const scoreGroups2 = liveGroups; // groups counted when projecting
@@ -1604,26 +1610,40 @@ export default function App() {
                     <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-start" }}>
                       <Info size={16} color={C.gold} style={{ flexShrink: 0, marginTop: 2 }} />
                       <p style={{ margin: 0, fontSize: 12.5, color: C.mute }}>
-                        Reorder each group to the actual finishing positions, toggle <b>Final</b>, then Save. Only groups marked Final are scored — so you can update as the tournament unfolds.
+                        Reorder each group to its current positions and set how many of its 6 matches have been <b>played</b> — that drives the live projection. Toggle <b>Final</b> (locks it at 6 played) to score it for real. Auto-sync fills this in for you once matches start.
                       </p>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      {GROUP_KEYS.map((gk) => (
+                      {GROUP_KEYS.map((gk) => {
+                        const setPlayed = (v) => setResultsDraft((d) => ({ ...d, [gk]: { ...d[gk], played: Math.max(0, Math.min(6, v)) } }));
+                        const pl = resultsDraft[gk].played || 0;
+                        const fin = resultsDraft[gk].final;
+                        return (
                         <GroupCard key={gk} gk={gk} order={resultsDraft[gk].order} onReorder={reorderResult} editable
                           headerRight={
-                            <button className="wc-btn" onClick={() => setResultsDraft((d) => ({ ...d, [gk]: { ...d[gk], final: !d[gk].final } }))}
-                              style={{
-                                display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 800,
-                                padding: "6px 10px", borderRadius: 999, cursor: "pointer",
-                                border: `1px solid ${resultsDraft[gk].final ? C.green : C.line}`,
-                                background: resultsDraft[gk].final ? "rgba(232,184,75,.12)" : "transparent",
-                                color: resultsDraft[gk].final ? C.green : C.mute,
-                              }}>
-                              {resultsDraft[gk].final ? <Lock size={13} /> : <Unlock size={13} />}
-                              {resultsDraft[gk].final ? "Final" : "Mark final"}
-                            </button>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              {!fin && (
+                                <div style={{ display: "inline-flex", alignItems: "center", gap: 4, border: `1px solid ${C.line}`, borderRadius: 999, padding: "2px 4px" }}>
+                                  <button className="wc-btn" onClick={() => setPlayed(pl - 1)} style={{ width: 22, height: 22, borderRadius: 999, border: "none", background: "rgba(20,20,25,.06)", color: C.text, fontWeight: 800, fontSize: 15, cursor: "pointer", lineHeight: 1 }}>−</button>
+                                  <span className="wc-mono" style={{ fontSize: 11.5, fontWeight: 700, minWidth: 30, textAlign: "center", color: pl > 0 ? C.green : C.mute }}>{pl}/6</span>
+                                  <button className="wc-btn" onClick={() => setPlayed(pl + 1)} style={{ width: 22, height: 22, borderRadius: 999, border: "none", background: "rgba(20,20,25,.06)", color: C.text, fontWeight: 800, fontSize: 15, cursor: "pointer", lineHeight: 1 }}>+</button>
+                                </div>
+                              )}
+                              <button className="wc-btn" onClick={() => setResultsDraft((d) => ({ ...d, [gk]: { ...d[gk], final: !d[gk].final, played: !d[gk].final ? 6 : d[gk].played } }))}
+                                style={{
+                                  display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 800,
+                                  padding: "6px 10px", borderRadius: 999, cursor: "pointer",
+                                  border: `1px solid ${fin ? C.green : C.line}`,
+                                  background: fin ? "rgba(232,184,75,.12)" : "transparent",
+                                  color: fin ? C.green : C.mute,
+                                }}>
+                                {fin ? <Lock size={13} /> : <Unlock size={13} />}
+                                {fin ? "Final" : "Mark final"}
+                              </button>
+                            </div>
                           } />
-                      ))}
+                        );
+                      })}
                     </div>
                     <button className="wc-btn" onClick={saveResults} style={{
                       width: "100%", marginTop: 18, background: C.grad, color: "#201700", border: "none",
