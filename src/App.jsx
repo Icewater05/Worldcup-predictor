@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   GripVertical, Trophy, Check, Users, Save, Info, Copy, RefreshCw, Zap,
   X, Lock, Unlock, Crown, ShieldCheck, RotateCcw, Medal, Flag,
-  LogOut, Mail, GitBranch, Pencil, ChevronUp, ChevronDown
+  LogOut, Mail, GitBranch, Pencil, ChevronUp, ChevronDown, TrendingUp
 } from "lucide-react";
 
 /* ----------------------------- DATA ----------------------------- */
@@ -206,6 +206,8 @@ function Styles() {
       .wc-hero-card:hover { transform: translateY(-3px); }
       .wc-spin { animation: wcSpin 1s linear infinite; }
       @keyframes wcSpin { to { transform: rotate(360deg); } }
+      .wc-pulse { width: 7px; height: 7px; border-radius: 99px; background: #3E9E5E; animation: wcPulse 1.6s infinite; display: inline-block; }
+      @keyframes wcPulse { 0%{ box-shadow:0 0 0 0 rgba(62,158,94,.55);} 70%{ box-shadow:0 0 0 7px rgba(62,158,94,0);} 100%{ box-shadow:0 0 0 0 rgba(62,158,94,0);} }
       input { font-family: inherit; }
       input:focus { outline: none; }
       ::-webkit-scrollbar { width: 9px; height: 9px; }
@@ -644,6 +646,7 @@ export default function App() {
   const [knockout, setKnockout] = useState(null);  // shared: { open, thirds, actual, finals }
   const [koDraft, setKoDraft] = useState({ open: false, thirds: [], actual: emptyKo(), finals: {} });
   const [scope, setScope] = useState("global"); // leaderboard scope: "league" | "global"
+  const [boardMode, setBoardMode] = useState("projected"); // "projected" | "official"
   const [leagueMode, setLeagueMode] = useState("none"); // "none" | "create" | "join"
   const [leagueNameInput, setLeagueNameInput] = useState("");
   const [leagueCodeInput, setLeagueCodeInput] = useState("");
@@ -976,17 +979,30 @@ export default function App() {
 
   // ----- leaderboard math -----
   const finalGroups = results ? GROUP_KEYS.filter((k) => results[k]?.final && results[k].order?.length === 4) : [];
+  // groups with a current table available (final OR in-progress) — used for projections
+  const liveGroups = results ? GROUP_KEYS.filter((k) => results[k]?.order?.length === 4) : [];
+  const hasLive = liveGroups.some((k) => !results[k].final); // any provisional (non-final) standings
+  const projecting = boardMode === "projected" && hasLive;    // effective mode
+  const scoreGroups2 = liveGroups; // groups counted when projecting
   const koActual = knockout?.actual;
   const koFinals = knockout?.finals || {};
   const koScoredRounds = KO_ROUNDS.filter((r) => koFinals?.[r.key]);
   const standings = allPreds.map((p) => {
-    let groupPts = 0; const per = {};
-    for (const k of finalGroups) {
+    let groupPtsOfficial = 0, groupPtsProjected = 0; const per = {}, perProj = {};
+    for (const k of liveGroups) {
       const s = scoreGroup(p.groups[k], results[k].order);
-      per[k] = s.points; groupPts += s.points;
+      perProj[k] = s.points; groupPtsProjected += s.points;
+      if (results[k].final) { per[k] = s.points; groupPtsOfficial += s.points; }
     }
     const ks = scoreKnockout(p.ko, koActual, koFinals);
-    return { ...p, groupPts, koPts: ks.points, koPer: ks.per, total: groupPts + ks.points, per };
+    const totalOfficial = groupPtsOfficial + ks.points;
+    const totalProjected = groupPtsProjected + ks.points;
+    return {
+      ...p, koPts: ks.points, koPer: ks.per, per, perProj,
+      groupPts: projecting ? groupPtsProjected : groupPtsOfficial,
+      total: projecting ? totalProjected : totalOfficial,
+      totalOfficial, totalProjected,
+    };
   }).sort((a, b) => b.total - a.total || a.submittedAt - b.submittedAt);
 
   // league scope
@@ -1017,6 +1033,14 @@ export default function App() {
     : kf.final ? (koActual?.final || []) : kf.sf ? (koActual?.sf || [])
     : kf.qf ? (koActual?.qf || []) : kf.r16 ? (koActual?.r16 || [])
     : (allGroupsFinal && koPool.length === 32 ? koPool : null);
+
+  // current user's live group breakdown (projection)
+  const myGroupsForProj = (identity && allPreds.find((p) => p.slug === identity.slug)?.groups) || picks;
+  const liveBreakdown = liveGroups.map((k) => {
+    const order = results[k].order;
+    const s = scoreGroup(myGroupsForProj[k], order);
+    return { gk: k, order, pts: s.points, played: results[k].played, total: results[k].total || 6, final: results[k].final };
+  });
 
   // consensus winners (pre-results)
   const consensus = GROUP_KEYS.map((k) => {
@@ -1337,9 +1361,24 @@ export default function App() {
         {view === "board" && (
           <div className="wc-fade">
             {scopedPreds.length > 0 && (
-              <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: "8px 6px 6px", marginBottom: 14, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
-                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".16em", color: C.mute, padding: "6px 12px 8px" }}>
-                  STANDINGS{useLeague ? " · " + (identity.groupName || "League") : ""}
+              <>
+              {hasLive && (
+                <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: "rgba(20,20,25,.055)", border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 10 }}>
+                  {[["projected", "Projected"], ["official", "Official"]].map(([id, label]) => (
+                    <button key={id} className="wc-btn" onClick={() => setBoardMode(id)} style={{
+                      flex: 1, padding: "9px 8px", borderRadius: 12, border: "none", cursor: "pointer", fontWeight: 800, fontSize: 13,
+                      background: boardMode === id ? C.grad : "transparent", color: boardMode === id ? "#201700" : C.mute,
+                      boxShadow: boardMode === id ? GRAD_SHADOW : "none",
+                    }}>{label}</button>
+                  ))}
+                </div>
+              )}
+              <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${projecting ? C.gold : C.line}`, borderRadius: 18, padding: "8px 6px 6px", marginBottom: projecting ? 8 : 14, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 12px 8px" }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".16em", color: C.mute }}>
+                    {projecting ? "PROJECTED STANDINGS" : "STANDINGS"}{useLeague ? " · " + (identity.groupName || "League") : ""}
+                  </span>
+                  {projecting && <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 9.5, fontWeight: 800, color: C.green }}><span className="wc-pulse" /> LIVE</span>}
                 </div>
                 {scopedStandings.map((p, i) => {
                   const medal = i === 0 ? C.gold : i === 1 ? "#9AA0A6" : i === 2 ? "#CD7F4A" : C.mute;
@@ -1359,6 +1398,26 @@ export default function App() {
                   );
                 })}
               </div>
+              {projecting && (() => {
+                const yi = scopedStandings.findIndex((p) => identity && p.slug === identity.slug);
+                if (yi < 0) return null;
+                const ord = ["1st","2nd","3rd","4th","5th","6th","7th","8th","9th","10th"][yi] || `${yi + 1}th`;
+                const me = scopedStandings[yi], above = scopedStandings[yi - 1], below = scopedStandings[yi + 1];
+                return (
+                  <div style={{ marginBottom: 14, padding: "0 2px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: C.text, fontWeight: 700 }}>
+                      <TrendingUp size={14} color={C.gold} /> You're {ord} of {scopedStandings.length} (projected)
+                    </div>
+                    <p style={{ fontSize: 12, color: C.mute, fontWeight: 600, margin: "4px 0 0" }}>
+                      {above ? `${above.total - me.total} pt behind ${above.name}` : "leading the pool"}{below ? `, ${me.total - below.total} ahead of ${below.name}` : ""}.
+                    </p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11.5, color: C.coral, fontWeight: 700, marginTop: 8 }}>
+                      <Info size={13} /> Provisional — shifts as matches end, and counts only once groups are final.
+                    </div>
+                  </div>
+                );
+              })()}
+              </>
             )}
 
             <TrackerCard teamsLeft={teamsLeft} matchesLeft={matchesLeft} matchesPlayed={matchesPlayed} stageLabel={stageLabel} survivors={survivors} />
@@ -1417,7 +1476,53 @@ export default function App() {
               <Empty icon={Trophy} text={useLeague ? "No one in this league yet. Share your code to fill it up." : "No predictions yet. Be the first in the Predict tab."} />
             )}
 
-            {scopedPreds.length > 0 && finalGroups.length === 0 && (
+            {projecting && liveBreakdown.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute, margin: "2px 2px 10px" }}>YOUR LIVE GROUP BREAKDOWN</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {liveBreakdown.map((g) => (
+                    <div key={g.gk} className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 14, boxShadow: "0 6px 18px rgba(20,20,25,.05)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                        <span style={{ fontWeight: 800, fontSize: 15 }}>Group {g.gk}</span>
+                        {g.final ? (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, fontWeight: 800, color: C.gold }}><Lock size={11} /> final</span>
+                        ) : (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 800, color: C.green }}><span className="wc-pulse" /> LIVE{g.played != null ? ` · ${g.played}/${g.total}` : ""}</span>
+                        )}
+                        <span className="wc-mono" style={{ marginLeft: "auto", fontWeight: 700, fontSize: 14, color: C.gold }}>+{g.pts} pts</span>
+                      </div>
+                      {g.order.map((team, i) => {
+                        const inSpot = myGroupsForProj[g.gk]?.[i] === team;
+                        const hadAt = (myGroupsForProj[g.gk] || []).indexOf(team);
+                        return (
+                          <div key={team}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 4px" }}>
+                              <span className="wc-mono" style={{ width: 16, textAlign: "center", fontWeight: 700, fontSize: 13, color: i < 2 ? C.text : C.mute }}>{i + 1}</span>
+                              <span style={{ fontSize: 17 }}>{FLAG[team]}</span>
+                              <span style={{ flex: 1, fontWeight: 700, fontSize: 14 }}>{team}</span>
+                              {inSpot ? (
+                                <span style={{ fontSize: 10.5, fontWeight: 800, color: C.green }}>✓ your pick</span>
+                              ) : (
+                                <span style={{ fontSize: 10.5, fontWeight: 700, color: C.mute, opacity: .7 }}>{hadAt >= 0 ? `you had #${hadAt + 1}` : ""}</span>
+                              )}
+                            </div>
+                            {i === 1 && (
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "3px 0" }}>
+                                <span style={{ flex: 1, borderTop: `1px dashed ${C.gold}`, opacity: .5 }} />
+                                <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".1em", color: C.gold, opacity: .8 }}>ADVANCE LINE</span>
+                                <span style={{ flex: 1, borderTop: `1px dashed ${C.gold}`, opacity: .5 }} />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {scopedPreds.length > 0 && liveGroups.length === 0 && (
               <>
                 <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
                   <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>Scores unlock after kickoff ⚽</div>
@@ -1449,7 +1554,7 @@ export default function App() {
               </>
             )}
 
-            {finalGroups.length > 0 && scopedStandings.map((p, i) => (
+            {!projecting && finalGroups.length > 0 && scopedStandings.map((p, i) => (
               <LeaderRow key={p.slug} p={p} rank={i + 1} finalGroups={finalGroups} koScoredRounds={koScoredRounds} />
             ))}
           </div>

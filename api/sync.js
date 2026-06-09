@@ -86,14 +86,15 @@ export default async function handler(req, res) {
     const prompt =
       `Fetch the CURRENT official 2026 FIFA World Cup results using web search (today is ${new Date().toDateString()}). ` +
       `Return ONLY a minified JSON object, no prose, no markdown. Schema: ` +
-      `{"groups":{"A":{"complete":boolean,"order":[t1,t2,t3,t4]}, ... all 12 groups A-L ...},` +
+      `{"groups":{"A":{"order":[t1,t2,t3,t4],"played":number,"complete":boolean}, ... all 12 groups A-L ...},` +
       `"thirds":[up to 8 third-place teams that advanced to the knockout],` +
       `"knockout":{"r16":[teams that reached the Round of 16],"qf":[teams that reached the Quarter-finals],"sf":[...],"final":[teams that reached the Final],"champion":[the winner]}}. ` +
       `Use EXACTLY these team names (group: teams) — ${teamsByGroup}. ` +
-      `"complete" is true only if all that group's matches are played; "order" is the final standings 1st to 4th. ` +
-      `If a group is unfinished use complete:false and order:[]. ` +
+      `"order" is the group table RIGHT NOW, 1st to 4th, by current points/tiebreakers, even if not all matches are played. ` +
+      `"played" is how many of that group's 6 matches have finished (0-6). "complete" is true only when played is 6. ` +
+      `If a group has not played any match yet, use order:[] and played:0. ` +
       `Only include a knockout team once it has confirmed reached that round; otherwise use []. ` +
-      `If the tournament has not started or no matches are complete, return every group complete:false and all arrays empty. Return only the JSON.`;
+      `If the tournament has not started, return every group order:[] played:0 complete:false and all arrays empty. Return only the JSON.`;
 
     const ar = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -122,14 +123,18 @@ export default async function handler(req, res) {
     const prevKo = prevKoRaw ? JSON.parse(prevKoRaw) : { open: false, thirds: [], actual: emptyKo(), finals: {} };
     const nextKo = { ...prevKo, actual: { ...emptyKo(), ...(prevKo.actual || {}) }, finals: { ...(prevKo.finals || {}) } };
 
-    // groups
+    // groups — store the current table (live or final) so the app can project
     let groupsSet = 0;
     for (const k of GROUP_KEYS) {
       const g = json.groups?.[k];
-      if (g?.complete && Array.isArray(g.order) && g.order.length === 4) {
+      if (g && Array.isArray(g.order) && g.order.length === 4) {
         const mapped = g.order.map(resolveTeam);
         const ok = mapped.every(Boolean) && new Set(mapped).size === 4 && mapped.every((t) => GROUPS[k].includes(t));
-        if (ok) { nextResults[k] = { order: mapped, final: true }; groupsSet++; }
+        if (ok) {
+          const played = Number.isFinite(g.played) ? g.played : (g.complete ? 6 : undefined);
+          nextResults[k] = { order: mapped, final: !!g.complete, total: 6, ...(played != null ? { played } : {}) };
+          groupsSet++;
+        }
       }
     }
 
