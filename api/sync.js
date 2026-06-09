@@ -113,8 +113,18 @@ export default async function handler(req, res) {
     const data = await ar.json();
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
     const start = text.indexOf("{"), end = text.lastIndexOf("}");
-    if (start < 0 || end < 0) throw new Error("no-json-in-model-response");
-    const json = JSON.parse(text.slice(start, end + 1));
+    // No JSON in the reply usually just means there's nothing to report yet
+    // (e.g. before/early in the tournament the model answers in prose). Treat
+    // that as a clean "nothing to update" rather than an error.
+    if (start < 0 || end < 0) {
+      return res.status(200).json({ ok: true, groupsSet: 0, koRounds: 0, note: "no-results-yet", syncedAt: Date.now() });
+    }
+    let json;
+    try {
+      json = JSON.parse(text.slice(start, end + 1));
+    } catch {
+      return res.status(200).json({ ok: true, groupsSet: 0, koRounds: 0, note: "no-results-yet", syncedAt: Date.now() });
+    }
 
     // ---- merge with existing stored state (preserve manual edits not overwritten) ----
     const prevResultsRaw = await kvGet(SUPA_URL, "wc26:results", supaHeaders);
