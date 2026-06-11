@@ -38,16 +38,16 @@ const FLAG = {
   "England": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Croatia": "🇭🇷", "Ghana": "🇬🇭", "Panama": "🇵🇦",
 };
 
-// FOX Sports power ranking (Alexi Lalas, all 48 teams) — each team's power ranking
+// NBC Sports power ranking (Joe Prince-Wright, all 48 teams, updated through the tournament)
 const RANK = {
-  "France": 1, "Spain": 2, "England": 3, "Colombia": 4, "Argentina": 5, "Portugal": 6,
-  "Brazil": 7, "Netherlands": 8, "Germany": 9, "Croatia": 10, "Belgium": 11, "United States": 12,
-  "Morocco": 13, "Mexico": 14, "Uruguay": 15, "Norway": 16, "Ecuador": 17, "Japan": 18,
-  "Switzerland": 19, "Korea Republic": 20, "Türkiye": 21, "Canada": 22, "Senegal": 23, "Austria": 24,
-  "Sweden": 25, "Paraguay": 26, "Scotland": 27, "Ghana": 28, "Czechia": 29, "Iran": 30,
-  "Saudi Arabia": 31, "Bosnia & Herzegovina": 32, "Algeria": 33, "Egypt": 34, "Ivory Coast": 35, "Australia": 36,
-  "Jordan": 37, "Tunisia": 38, "DR Congo": 39, "Uzbekistan": 40, "Qatar": 41, "Iraq": 42,
-  "New Zealand": 43, "Cape Verde": 44, "South Africa": 45, "Panama": 46, "Curaçao": 47, "Haiti": 48,
+  "France": 1, "Spain": 2, "Argentina": 3, "England": 4, "Portugal": 5, "Brazil": 6,
+  "Morocco": 7, "Netherlands": 8, "Belgium": 9, "Germany": 10, "Senegal": 11, "Ecuador": 12,
+  "Japan": 13, "Türkiye": 14, "Colombia": 15, "Switzerland": 16, "Croatia": 17, "United States": 18,
+  "Canada": 19, "Norway": 20, "Uruguay": 21, "Mexico": 22, "Austria": 23, "Scotland": 24,
+  "Korea Republic": 25, "Egypt": 26, "Ivory Coast": 27, "Czechia": 28, "Australia": 29, "Paraguay": 30,
+  "Sweden": 31, "Iran": 32, "Bosnia & Herzegovina": 33, "Algeria": 34, "Ghana": 35, "Saudi Arabia": 36,
+  "South Africa": 37, "Uzbekistan": 38, "Tunisia": 39, "Cape Verde": 40, "DR Congo": 41, "Panama": 42,
+  "Qatar": 43, "Haiti": 44, "Iraq": 45, "New Zealand": 46, "Curaçao": 47, "Jordan": 48,
 };
 
 // Map common web spellings to the app's canonical team names
