@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   GripVertical, Trophy, Check, Users, Save, Info, Copy, RefreshCw, Zap,
   X, Lock, Unlock, Crown, ShieldCheck, RotateCcw, Medal, Flag,
-  LogOut, Mail, GitBranch, Pencil, ChevronUp, ChevronDown, TrendingUp
+  LogOut, Mail, GitBranch, Pencil, ChevronUp, ChevronDown, TrendingUp, Eye, User
 } from "lucide-react";
 
 /* ----------------------------- DATA ----------------------------- */
@@ -329,6 +329,23 @@ function DragList({ items, onReorder, editable }) {
   );
 }
 
+function PickRow({ order }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+      {order.map((t, i) => (
+        <span key={t} style={{
+          display: "inline-flex", alignItems: "center", gap: 3, fontSize: 12, padding: "3px 7px", borderRadius: 8,
+          background: i < 2 ? "rgba(232,184,75,.16)" : C.panel2,
+          border: `1px solid ${i < 2 ? "rgba(200,144,28,.4)" : C.line}`,
+          fontWeight: i < 2 ? 800 : 600, color: i < 2 ? C.text : C.mute,
+        }}>
+          <span style={{ fontSize: 13 }}>{FLAG[t]}</span>{t}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function GroupCard({ gk, order, onReorder, editable, headerRight, scored }) {
   return (
     <div className="wc-fade wc-glass" style={{
@@ -649,6 +666,9 @@ export default function App() {
   const [scope, setScope] = useState("global"); // leaderboard scope: "league" | "global"
   const [boardMode, setBoardMode] = useState("projected"); // "projected" | "official"
   const [picksLocked, setPicksLocked] = useState(false); // host-controlled group-pick lock
+  const [peopleMode, setPeopleMode] = useState("player"); // everyone's-picks browser: "player" | "group"
+  const [openPerson, setOpenPerson] = useState(null);
+  const [peopleGroup, setPeopleGroup] = useState(GROUP_KEYS[0]);
   const [leagueMode, setLeagueMode] = useState("none"); // "none" | "create" | "join"
   const [leagueNameInput, setLeagueNameInput] = useState("");
   const [leagueCodeInput, setLeagueCodeInput] = useState("");
@@ -1349,11 +1369,16 @@ export default function App() {
               </div>
             )}
             {picksLocked && (
-              <div className="wc-glass" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "rgba(217,84,74,.08)", border: `1px solid ${C.coral}`, borderRadius: 14, marginBottom: 14 }}>
-                <Lock size={17} color={C.coral} style={{ flexShrink: 0 }} />
-                <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: C.text }}>
-                  Group picks are locked by the host — your saved order is final. You can still watch the board and projections.
-                </p>
+              <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "14px 16px", borderRadius: 16, marginBottom: 14, background: "rgba(62,158,94,.09)", border: `1px solid ${C.green}` }}>
+                <div style={{ width: 38, height: 38, borderRadius: 11, background: "rgba(62,158,94,.16)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                  <Check size={20} color={C.green} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, display: "flex", alignItems: "center", gap: 7 }}>
+                    Submitted <Lock size={13} color={C.mute} /> <span style={{ color: C.mute, fontWeight: 700, fontSize: 13 }}>· locked</span>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: C.mute, fontWeight: 600 }}>This is your final group order. See everyone's picks on the Board.</div>
+                </div>
               </div>
             )}
             <div style={{ position: "relative" }}>
@@ -1584,6 +1609,87 @@ export default function App() {
             {!projecting && finalGroups.length > 0 && scopedStandings.map((p, i) => (
               <LeaderRow key={p.slug} p={p} rank={i + 1} finalGroups={finalGroups} koScoredRounds={koScoredRounds} />
             ))}
+
+            {picksLocked && scopedPreds.length > 0 && (
+              <div style={{ marginTop: 22 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".14em", color: C.mute, margin: "0 2px 4px" }}>EVERYONE'S PICKS</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "0 2px 12px", color: C.mute }}>
+                  <Eye size={14} />
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>What everyone predicted. Qualifiers (top 2) are highlighted.</span>
+                </div>
+
+                <div style={{ display: "flex", gap: 6, padding: 5, background: "rgba(20,20,25,.055)", border: `1px solid ${C.line}`, borderRadius: 14, marginBottom: 14 }}>
+                  {[["player", "By player", User], ["group", "By group", Users]].map(([id, label, Icon]) => (
+                    <button key={id} className="wc-btn" onClick={() => setPeopleMode(id)} style={{
+                      flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      padding: "9px 8px", borderRadius: 10, border: "none", cursor: "pointer", fontWeight: 800, fontSize: 12.5,
+                      background: peopleMode === id ? "#fff" : "transparent", color: peopleMode === id ? C.text : C.mute,
+                      boxShadow: peopleMode === id ? "0 2px 8px rgba(20,20,25,.08)" : "none",
+                    }}><Icon size={14} /> {label}</button>
+                  ))}
+                </div>
+
+                {peopleMode === "player" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {scopedStandings.map((p) => {
+                      const open = openPerson === p.slug;
+                      const meRow = identity && p.slug === identity.slug;
+                      return (
+                        <div key={p.slug} style={{ background: C.panel, border: `1px solid ${open ? C.gold : C.line}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 6px 18px rgba(20,20,25,.05)" }}>
+                          <button className="wc-btn" onClick={() => setOpenPerson(open ? null : p.slug)} style={{
+                            width: "100%", display: "flex", alignItems: "center", gap: 11, padding: "13px 15px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left",
+                          }}>
+                            <div style={{ width: 34, height: 34, borderRadius: 999, background: meRow ? C.grad : C.panel2, display: "grid", placeItems: "center", fontWeight: 800, fontSize: 14, color: meRow ? "#201700" : C.mute, flexShrink: 0 }}>
+                              {(p.name || "?")[0].toUpperCase()}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 800, fontSize: 15 }}>{p.name}{meRow ? " (you)" : ""}</div>
+                              <div style={{ fontSize: 11.5, color: C.mute, fontWeight: 600 }}>Tap to see all 12 group picks</div>
+                            </div>
+                            <ChevronDown size={18} color={C.mute} style={{ transform: open ? "rotate(180deg)" : "none", transition: ".2s", flexShrink: 0 }} />
+                          </button>
+                          {open && (
+                            <div style={{ padding: "2px 15px 15px", display: "flex", flexDirection: "column", gap: 11 }}>
+                              {GROUP_KEYS.map((g) => (
+                                <div key={g}>
+                                  <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".1em", color: C.mute, marginBottom: 5 }}>GROUP {g}</div>
+                                  <PickRow order={p.groups[g] || GROUPS[g]} />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {peopleMode === "group" && (
+                  <div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+                      {GROUP_KEYS.map((g) => (
+                        <button key={g} className="wc-btn" onClick={() => setPeopleGroup(g)} style={{
+                          width: 34, height: 34, borderRadius: 10, border: `1px solid ${peopleGroup === g ? C.gold : C.line}`, cursor: "pointer",
+                          fontWeight: 800, fontSize: 13, background: peopleGroup === g ? C.grad : "transparent", color: peopleGroup === g ? "#201700" : C.mute,
+                        }}>{g}</button>
+                      ))}
+                    </div>
+                    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "8px 14px 12px", boxShadow: "0 6px 18px rgba(20,20,25,.05)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute, padding: "8px 0 4px" }}>GROUP {peopleGroup} — WHO PICKED WHAT</div>
+                      {scopedStandings.map((p, idx) => {
+                        const meRow = identity && p.slug === identity.slug;
+                        return (
+                          <div key={p.slug} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderTop: idx ? `1px solid ${C.line}` : "none" }}>
+                            <span style={{ width: 64, fontWeight: 800, fontSize: 12.5, color: meRow ? C.gold : C.text, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}{meRow ? " *" : ""}</span>
+                            <PickRow order={p.groups[peopleGroup] || GROUPS[peopleGroup]} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
