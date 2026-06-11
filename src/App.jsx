@@ -145,6 +145,7 @@ const RESULTS_KEY = "wc26:results";
 const KNOCKOUT_KEY = "wc26:knockout";
 const IDENTITY_KEY = "wc26:identity";
 const GROUP_PREFIX = "wc26:group:";
+const LOCK_KEY = "wc26:locked";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
 const genCode = () => Array.from({ length: 5 }, () => CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)]).join("");
 // Only these accounts can open the Results (host) tab. Set in .env / Vercel:
@@ -647,6 +648,7 @@ export default function App() {
   const [koDraft, setKoDraft] = useState({ open: false, thirds: [], actual: emptyKo(), finals: {} });
   const [scope, setScope] = useState("global"); // leaderboard scope: "league" | "global"
   const [boardMode, setBoardMode] = useState("projected"); // "projected" | "official"
+  const [picksLocked, setPicksLocked] = useState(false); // host-controlled group-pick lock
   const [leagueMode, setLeagueMode] = useState("none"); // "none" | "create" | "join"
   const [leagueNameInput, setLeagueNameInput] = useState("");
   const [leagueCodeInput, setLeagueCodeInput] = useState("");
@@ -689,6 +691,8 @@ export default function App() {
         setKoDraft(norm);
       } catch {}
     }
+    const lk = await store.get(LOCK_KEY);
+    setPicksLocked(lk?.value === "1" || lk?.value === "true");
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
@@ -803,6 +807,7 @@ export default function App() {
 
   const submit = async () => {
     if (!identity) return;
+    if (picksLocked) { flash("Group picks are locked by the host 🔒"); return; }
     const s = identity.slug;
     // Race guard: don't clobber someone else who claimed this name first
     const existing = await store.get(PRED_PREFIX + s);
@@ -975,6 +980,14 @@ export default function App() {
     setResultsDraft(Object.fromEntries(GROUP_KEYS.map((k) => [k, { order: [...GROUPS[k]], final: false, played: 0 }])));
     await loadAll();
     flash("Everything reset");
+  };
+
+  const toggleLock = async () => {
+    const next = !picksLocked;
+    if (next && !window.confirm("Lock all group picks? Players won't be able to change their group order until you unlock.")) return;
+    await store.set(LOCK_KEY, next ? "1" : "0");
+    setPicksLocked(next);
+    flash(next ? "Group picks locked 🔒" : "Group picks unlocked 🔓");
   };
 
   // ----- leaderboard math -----
@@ -1335,6 +1348,14 @@ export default function App() {
                 Drag the handle on the right of each team to its predicted finishing position.
               </div>
             )}
+            {picksLocked && (
+              <div className="wc-glass" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "rgba(217,84,74,.08)", border: `1px solid ${C.coral}`, borderRadius: 14, marginBottom: 14 }}>
+                <Lock size={17} color={C.coral} style={{ flexShrink: 0 }} />
+                <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: C.text }}>
+                  Group picks are locked by the host — your saved order is final. You can still watch the board and projections.
+                </p>
+              </div>
+            )}
             <div style={{ position: "relative" }}>
               {!committed && (
                 <div style={{
@@ -1346,14 +1367,14 @@ export default function App() {
                   </div>
                 </div>
               )}
-              <div style={{ display: "flex", flexDirection: "column", gap: 14, opacity: committed ? 1 : .45 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 14, opacity: committed ? (picksLocked ? .7 : 1) : .45 }}>
                 {GROUP_KEYS.map((gk) => (
-                  <GroupCard key={gk} gk={gk} order={picks[gk]} onReorder={reorderGroup} editable={committed} />
+                  <GroupCard key={gk} gk={gk} order={picks[gk]} onReorder={reorderGroup} editable={committed && !picksLocked} />
                 ))}
               </div>
             </div>
 
-            {committed && (
+            {committed && !picksLocked && (
               <button className="wc-btn" onClick={submit} style={{
                 width: "100%", marginTop: 18, background: C.grad, color: "#201700", border: "none",
                 borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: "pointer",
@@ -1601,6 +1622,26 @@ export default function App() {
                   <p style={{ fontSize: 10.5, color: C.mute, margin: "8px 0 0", opacity: .8 }}>
                     Best-effort from public sources — double-check below and tweak anything that looks off.
                   </p>
+                </div>
+
+                <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${picksLocked ? C.coral : C.line}`, borderRadius: 18, padding: 16, marginBottom: 16, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 38, height: 38, borderRadius: 11, background: picksLocked ? "rgba(217,84,74,.12)" : "rgba(20,20,25,.05)", border: `1px solid ${picksLocked ? C.coral : C.line}`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                      {picksLocked ? <Lock size={18} color={C.coral} /> : <Unlock size={18} color={C.mute} />}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 800, fontSize: 14 }}>{picksLocked ? "Group picks are locked" : "Group picks are open"}</div>
+                      <div style={{ fontSize: 11.5, color: C.mute }}>{picksLocked ? "Players can't change their group order." : "Lock once games start so no one edits after kickoff."}</div>
+                    </div>
+                    <button className="wc-btn" onClick={toggleLock} style={{
+                      display: "inline-flex", alignItems: "center", gap: 7, border: "none",
+                      borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", flexShrink: 0,
+                      background: picksLocked ? "rgba(20,20,25,.06)" : C.grad, color: picksLocked ? C.text : "#201700",
+                      boxShadow: picksLocked ? "none" : GRAD_SHADOW,
+                    }}>
+                      {picksLocked ? <><Unlock size={15} /> Unlock</> : <><Lock size={15} /> Lock picks</>}
+                    </button>
+                  </div>
                 </div>
 
                 <PhaseToggle phase={phase} setPhase={setPhase} koLocked={false} />
