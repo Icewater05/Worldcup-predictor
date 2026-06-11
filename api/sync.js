@@ -84,17 +84,15 @@ export default async function handler(req, res) {
 
     const teamsByGroup = Object.entries(GROUPS).map(([k, t]) => `${k}: ${t.join(", ")}`).join("; ");
     const prompt =
-      `Fetch the CURRENT official 2026 FIFA World Cup results using web search (today is ${new Date().toDateString()}). ` +
-      `Return ONLY a minified JSON object, no prose, no markdown. Schema: ` +
-      `{"groups":{"A":{"order":[t1,t2,t3,t4],"played":number,"complete":boolean}, ... all 12 groups A-L ...},` +
-      `"thirds":[up to 8 third-place teams that advanced to the knockout],` +
-      `"knockout":{"r16":[teams that reached the Round of 16],"qf":[teams that reached the Quarter-finals],"sf":[...],"final":[teams that reached the Final],"champion":[the winner]}}. ` +
-      `Use EXACTLY these team names (group: teams) — ${teamsByGroup}. ` +
-      `"order" is the group table RIGHT NOW, 1st to 4th, by current points/tiebreakers, even if not all matches are played. ` +
-      `"played" is how many of that group's 6 matches have finished (0-6). "complete" is true only when played is 6. ` +
-      `If a group has not played any match yet, use order:[] and played:0. ` +
-      `Only include a knockout team once it has confirmed reached that round; otherwise use []. ` +
-      `If the tournament has not started, return every group order:[] played:0 complete:false and all arrays empty. Return only the JSON.`;
+      `You have a web search tool. The 2026 FIFA World Cup is underway (today is ${new Date().toDateString()}). ` +
+      `Search the web for the latest results — search several times if needed (e.g. "World Cup 2026 results today", "World Cup 2026 scores", specific group fixtures). ` +
+      `Then reply with ONLY a single minified JSON object — no prose, no markdown, no backticks. ALWAYS return valid JSON even if nothing has finished yet (use empty arrays). Schema: ` +
+      `{"matches":[{"group":"<A-L>","home":"<team>","away":"<team>","homeGoals":<int>,"awayGoals":<int>}],` +
+      `"knockout":{"r16":[teams that reached the Round of 16],"qf":[...],"sf":[...],"final":[...],"champion":[...]},` +
+      `"thirds":[up to 8 third-place teams that advanced]}. ` +
+      `In "matches" include ONLY matches that have FINISHED (full-time) with their final score; omit fixtures not yet kicked off or still in progress. ` +
+      `Use EXACTLY these team names and the correct group letter for each (group: teams) — ${teamsByGroup}. ` +
+      `For knockout arrays, include a team only once it has confirmed reached that round; otherwise []. Reply with only the JSON object.`;
 
     const ar = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -105,13 +103,23 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 2000,
+        max_tokens: 3000,
         messages: [{ role: "user", content: prompt }],
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
+        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 6 }],
       }),
     });
     const data = await ar.json();
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+
+    // ?debug=1 — return what the model actually said (and whether it searched), without changing stored data
+    const debugMode = (req.query && (req.query.debug === "1" || req.query.debug === "true")) || String(req.url || "").includes("debug=1");
+    if (debugMode) {
+      const searchBlocks = (data.content || []).filter((b) => b.type === "server_tool_use" || b.type === "web_search_tool_result").length;
+      return res.status(200).json({
+        ok: true, debug: true, searchBlocks, stop_reason: data.stop_reason || null,
+        apiError: data.error || null, modelText: (text || "").slice(0, 4000),
+      });
+    }
     const start = text.indexOf("{"), end = text.lastIndexOf("}");
     // No JSON in the reply usually just means there's nothing to report yet
     // (e.g. before/early in the tournament the model answers in prose). Treat
@@ -133,19 +141,31 @@ export default async function handler(req, res) {
     const prevKo = prevKoRaw ? JSON.parse(prevKoRaw) : { open: false, thirds: [], actual: emptyKo(), finals: {} };
     const nextKo = { ...prevKo, actual: { ...emptyKo(), ...(prevKo.actual || {}) }, finals: { ...(prevKo.finals || {}) } };
 
-    // groups — store the current table (live or final) so the app can project
+    // groups — compute each group's current table from finished match scores
     let groupsSet = 0;
+    const allMatches = Array.isArray(json.matches) ? json.matches : [];
     for (const k of GROUP_KEYS) {
-      const g = json.groups?.[k];
-      if (g && Array.isArray(g.order) && g.order.length === 4) {
-        const mapped = g.order.map(resolveTeam);
-        const ok = mapped.every(Boolean) && new Set(mapped).size === 4 && mapped.every((t) => GROUPS[k].includes(t));
-        if (ok) {
-          const played = Number.isFinite(g.played) ? g.played : (g.complete ? 6 : undefined);
-          nextResults[k] = { order: mapped, final: !!g.complete, total: 6, ...(played != null ? { played } : {}) };
-          groupsSet++;
-        }
+      const teams = GROUPS[k];
+      const seed = Object.fromEntries(teams.map((t, i) => [t, i]));
+      const stat = Object.fromEntries(teams.map((t) => [t, { pts: 0, gd: 0, gf: 0, pl: 0 }]));
+      let played = 0;
+      for (const m of allMatches) {
+        if (String(m.group).toUpperCase() !== k) continue;
+        const home = resolveTeam(m.home), away = resolveTeam(m.away);
+        const hg = Number(m.homeGoals), ag = Number(m.awayGoals);
+        if (!home || !away || !stat[home] || !stat[away]) continue;
+        if (!Number.isFinite(hg) || !Number.isFinite(ag)) continue;
+        stat[home].gf += hg; stat[home].gd += hg - ag; stat[home].pl++;
+        stat[away].gf += ag; stat[away].gd += ag - hg; stat[away].pl++;
+        if (hg > ag) stat[home].pts += 3; else if (ag > hg) stat[away].pts += 3; else { stat[home].pts++; stat[away].pts++; }
+        played++;
       }
+      if (played === 0) continue; // nothing happened in this group yet — leave as-is
+      const order = [...teams].sort((a, b) =>
+        stat[b].pts - stat[a].pts || stat[b].gd - stat[a].gd || stat[b].gf - stat[a].gf || seed[a] - seed[b]
+      );
+      nextResults[k] = { order, played, total: 6, final: played >= 6 };
+      groupsSet++;
     }
 
     // knockout
