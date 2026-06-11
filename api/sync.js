@@ -102,7 +102,7 @@ export default async function handler(req, res) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: 3000,
         messages: [{ role: "user", content: prompt }],
         tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 6 }],
@@ -110,6 +110,11 @@ export default async function handler(req, res) {
     });
     const data = await ar.json();
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+
+    // surface a real API error (bad model, auth, credit, etc.) instead of a silent "no results"
+    if (data.error) {
+      return res.status(200).json({ ok: false, error: data.error.message || data.error.type || "Anthropic API error" });
+    }
 
     // ?debug=1 — return what the model actually said (and whether it searched), without changing stored data
     const debugMode = (req.query && (req.query.debug === "1" || req.query.debug === "true")) || String(req.url || "").includes("debug=1");
