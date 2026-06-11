@@ -1060,14 +1060,19 @@ export default function App() {
   // ----- tournament tracker: remaining teams & matches -----
   const kf = koFinals;
   const teamsLeft = kf.champion ? 1 : kf.final ? 2 : kf.sf ? 4 : kf.qf ? 8 : kf.r16 ? 16 : allGroupsFinal ? 32 : 48;
+  const groupMatchesPlayed = results ? GROUP_KEYS.reduce((n, k) => {
+    const r = results[k];
+    if (!r) return n;
+    return n + (r.final ? 6 : Math.min(6, r.played || 0));
+  }, 0) : 0;
   const matchesPlayed =
-    finalGroups.length * 6 +                       // 6 matches per completed group
+    groupMatchesPlayed +                            // actual group matches played so far
     (kf.r16 ? 16 : 0) + (kf.qf ? 8 : 0) + (kf.sf ? 4 : 0) +
     (kf.final ? 2 : 0) + (kf.champion ? 2 : 0);     // champion done ⇒ final + 3rd-place played
   const matchesLeft = 104 - matchesPlayed;
   const stageLabel = kf.champion ? "Champion crowned 🏆" : kf.final ? "The Final" : kf.sf ? "Semi-finals"
     : kf.qf ? "Quarter-finals" : kf.r16 ? "Round of 16" : allGroupsFinal ? "Round of 32"
-    : finalGroups.length > 0 ? "Group stage" : "Kicks off June 11";
+    : (groupMatchesPlayed > 0 || finalGroups.length > 0) ? "Group stage" : "Kicks off June 11";
   const survivors = kf.champion ? (koActual?.champion || [])
     : kf.final ? (koActual?.final || []) : kf.sf ? (koActual?.sf || [])
     : kf.qf ? (koActual?.qf || []) : kf.r16 ? (koActual?.r16 || [])
