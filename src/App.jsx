@@ -754,16 +754,16 @@ export default function App() {
     if (!supabase) { setAuthReady(true); return; }
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session || null);
-      if (data.session?.user) loadProfile(data.session.user);
+      if (data.session?.user) { loadProfile(data.session.user); loadAll(); }
       setAuthReady(true);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, sess) => {
       setSession(sess || null);
-      if (sess?.user) { loadProfile(sess.user); }
+      if (sess?.user) { loadProfile(sess.user); loadAll(); }
       else { setIdentity(null); setCommitted(false); setName(""); setPicks(freshPicks()); setKoPicks(emptyKo()); }
     });
     return () => sub?.subscription?.unsubscribe?.();
-  }, [loadProfile]);
+  }, [loadProfile, loadAll]);
 
   const signIn = async () => {
     if (!supabase) return;
