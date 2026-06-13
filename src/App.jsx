@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   GripVertical, Trophy, Check, Users, Save, Info, Copy, RefreshCw, Zap,
   X, Lock, Unlock, Crown, ShieldCheck, RotateCcw, Medal, Flag,
-  LogOut, Mail, GitBranch, Pencil, ChevronUp, ChevronDown, TrendingUp, TrendingDown, Eye, User, Share2
+  LogOut, Mail, GitBranch, Pencil, ChevronUp, ChevronDown, TrendingUp, TrendingDown, Eye, User, Share2, Calendar
 } from "lucide-react";
 
 /* ----------------------------- DATA ----------------------------- */
@@ -147,6 +147,17 @@ const IDENTITY_KEY = "wc26:identity";
 const GROUP_PREFIX = "wc26:group:";
 const LOCK_KEY = "wc26:locked";
 const MOVERS_KEY = "wc26:movers";
+const TODAY_KEY = "wc26:today";
+const CODE = {
+  "France": "FRA", "Spain": "ESP", "Argentina": "ARG", "England": "ENG", "Portugal": "POR", "Brazil": "BRA",
+  "Morocco": "MAR", "Netherlands": "NED", "Belgium": "BEL", "Germany": "GER", "Senegal": "SEN", "Ecuador": "ECU",
+  "Japan": "JPN", "Türkiye": "TUR", "Colombia": "COL", "Switzerland": "SUI", "Croatia": "CRO", "United States": "USA",
+  "Canada": "CAN", "Norway": "NOR", "Uruguay": "URU", "Mexico": "MEX", "Austria": "AUT", "Scotland": "SCO",
+  "Korea Republic": "KOR", "Egypt": "EGY", "Ivory Coast": "CIV", "Czechia": "CZE", "Australia": "AUS", "Paraguay": "PAR",
+  "Sweden": "SWE", "Iran": "IRN", "Bosnia & Herzegovina": "BIH", "Algeria": "ALG", "Ghana": "GHA", "Saudi Arabia": "KSA",
+  "South Africa": "RSA", "Uzbekistan": "UZB", "Tunisia": "TUN", "Cape Verde": "CPV", "DR Congo": "COD", "Panama": "PAN",
+  "Qatar": "QAT", "Haiti": "HAI", "Iraq": "IRQ", "New Zealand": "NZL", "Curaçao": "CUW", "Jordan": "JOR",
+};
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
 const genCode = () => Array.from({ length: 5 }, () => CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)]).join("");
 // Only these accounts can open the Results (host) tab. Set in .env / Vercel:
@@ -326,6 +337,54 @@ function DragList({ items, onReorder, editable }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function TodayMatches({ data }) {
+  const matches = data?.matches;
+  if (!Array.isArray(matches) || matches.length === 0) return null;
+  const tcode = (t) => CODE[t] || t;
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "0 2px 9px", color: C.mute }}>
+        <Calendar size={14} />
+        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em" }}>TODAY'S MATCHES{data.date ? ` · ${data.date}` : ""}</span>
+      </div>
+      <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 6 }}>
+        {matches.map((m, i) => {
+          const live = m.status === "live", final = m.status === "final";
+          const hw = (live || final) && m.homeGoals > m.awayGoals;
+          const aw = (live || final) && m.awayGoals > m.homeGoals;
+          return (
+            <div key={i} className="wc-glass" style={{ flex: "0 0 auto", width: 152, background: C.panel, border: `1px solid ${live ? C.green : C.line}`, borderRadius: 14, padding: "11px 12px", boxShadow: "0 6px 16px rgba(20,20,25,.05)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".06em", color: C.gold }}>{m.group ? `GROUP ${m.group}` : "MATCH"}</span>
+                {live ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 9.5, fontWeight: 800, color: C.green }}><span className="wc-pulse" />{m.minute ? ` ${m.minute}` : " LIVE"}</span>
+                ) : final ? (
+                  <span style={{ fontSize: 9.5, fontWeight: 800, color: C.mute }}>FULL TIME</span>
+                ) : (
+                  <span style={{ fontSize: 9.5, fontWeight: 800, color: C.blue }}>{m.etTime ? `${m.etTime} ET` : "TBD"}</span>
+                )}
+              </div>
+              {[["home", hw], ["away", aw]].map(([side, win], idx) => (
+                <div key={side}>
+                  {idx === 1 && <div style={{ height: 1, background: C.line, margin: "7px 0" }} />}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, opacity: (live || final) && !win && (idx === 0 ? aw : hw) ? .5 : 1 }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 17 }}>{FLAG[m[side]] || "🏳️"}</span>
+                      <span style={{ fontWeight: win ? 800 : 700, fontSize: 13.5 }}>{tcode(m[side])}</span>
+                    </span>
+                    {(live || final) && <span className="wc-mono" style={{ fontWeight: 800, fontSize: 15 }}>{idx === 0 ? m.homeGoals : m.awayGoals}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+      <p style={{ fontSize: 10.5, color: C.mute, margin: "6px 2px 0", opacity: .8 }}>Kickoff times in US Eastern (ET).</p>
     </div>
   );
 }
@@ -647,7 +706,7 @@ export default function App() {
   const [nameError, setNameError] = useState("");
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
-  const [howOpen, setHowOpen] = useState(() => { try { return localStorage.getItem("wc26:howOpen") !== "0"; } catch { return true; } });
+  const [howOpen, setHowOpen] = useState(() => { try { return localStorage.getItem("wc26:howOpen") === "1"; } catch { return false; } });
   const toggleHow = () => setHowOpen((o) => { const n = !o; try { localStorage.setItem("wc26:howOpen", n ? "1" : "0"); } catch {} return n; });
   const [session, setSession] = useState(null);   // Supabase auth session (or null)
   const [authReady, setAuthReady] = useState(false);
@@ -655,6 +714,7 @@ export default function App() {
   const [recovery, setRecovery] = useState(false); // password-reset (PASSWORD_RECOVERY) flow
   const [moversSnap, setMoversSnap] = useState(null); // daily standings baseline for "movers"
   const [moversLoaded, setMoversLoaded] = useState(false);
+  const [today, setToday] = useState(null); // { date, matches:[...] } from sync
   const [newPw, setNewPw] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPw, setAuthPw] = useState("");
@@ -726,6 +786,8 @@ export default function App() {
     const mv = await store.get(MOVERS_KEY);
     if (mv?.value) { try { setMoversSnap(JSON.parse(mv.value)); } catch {} }
     setMoversLoaded(true);
+    const td = await store.get(TODAY_KEY);
+    if (td?.value) { try { setToday(JSON.parse(td.value)); } catch {} }
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
@@ -1238,6 +1300,8 @@ export default function App() {
               </div>
             ))}
           </div>
+
+          <TodayMatches data={today} />
 
           {/* how it works (collapsible) */}
           <button className="wc-btn" onClick={toggleHow} style={{
