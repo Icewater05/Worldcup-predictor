@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   GripVertical, Trophy, Check, Users, Save, Info, Copy, RefreshCw, Zap,
   X, Lock, Unlock, Crown, ShieldCheck, RotateCcw, Medal, Flag,
-  LogOut, Mail, GitBranch, Pencil, ChevronUp, ChevronDown, TrendingUp, Eye, User, Share2
+  LogOut, Mail, GitBranch, Pencil, ChevronUp, ChevronDown, TrendingUp, TrendingDown, Eye, User, Share2
 } from "lucide-react";
 
 /* ----------------------------- DATA ----------------------------- */
@@ -146,6 +146,7 @@ const KNOCKOUT_KEY = "wc26:knockout";
 const IDENTITY_KEY = "wc26:identity";
 const GROUP_PREFIX = "wc26:group:";
 const LOCK_KEY = "wc26:locked";
+const MOVERS_KEY = "wc26:movers";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
 const genCode = () => Array.from({ length: 5 }, () => CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)]).join("");
 // Only these accounts can open the Results (host) tab. Set in .env / Vercel:
@@ -652,6 +653,8 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [authMode, setAuthMode] = useState("signin"); // "signin" | "signup"
   const [recovery, setRecovery] = useState(false); // password-reset (PASSWORD_RECOVERY) flow
+  const [moversSnap, setMoversSnap] = useState(null); // daily standings baseline for "movers"
+  const [moversLoaded, setMoversLoaded] = useState(false);
   const [newPw, setNewPw] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPw, setAuthPw] = useState("");
@@ -720,6 +723,9 @@ export default function App() {
     }
     const lk = await store.get(LOCK_KEY);
     setPicksLocked(lk?.value === "1" || lk?.value === "true");
+    const mv = await store.get(MOVERS_KEY);
+    if (mv?.value) { try { setMoversSnap(JSON.parse(mv.value)); } catch {} }
+    setMoversLoaded(true);
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
@@ -1127,6 +1133,28 @@ export default function App() {
     };
   }).sort((a, b) => b.total - a.total || a.submittedAt - b.submittedAt);
 
+  // ----- daily movers (rank change since the start of the day) -----
+  const moversRanking = [...standings].sort((a, b) => b.totalProjected - a.totalProjected || (a.submittedAt || 0) - (b.submittedAt || 0));
+  const todayStr = new Date().toISOString().slice(0, 10);
+  useEffect(() => {
+    if (!storageReady || !moversLoaded || moversRanking.length === 0) return;
+    if (moversSnap?.baselineDay === todayStr) return; // already captured today's baseline
+    const baseline = {};
+    moversRanking.forEach((p, i) => { baseline[p.slug] = i + 1; });
+    const snap = { baselineDay: todayStr, baseline };
+    setMoversSnap(snap);
+    store.set(MOVERS_KEY, JSON.stringify(snap));
+  }, [storageReady, moversLoaded, moversRanking.length, moversSnap, todayStr]);
+  const moversList = moversSnap?.baseline
+    ? moversRanking.map((p, i) => {
+        const base = moversSnap.baseline[p.slug];
+        return base ? { slug: p.slug, name: p.name, delta: base - (i + 1) } : null;
+      }).filter((m) => m && m.delta !== 0)
+    : [];
+  const climbers = moversList.filter((m) => m.delta > 0).sort((a, b) => b.delta - a.delta).slice(0, 3);
+  const fallers = moversList.filter((m) => m.delta < 0).sort((a, b) => a.delta - b.delta).slice(0, 3);
+  const hasMovers = climbers.length > 0 || fallers.length > 0;
+
   // league scope
   const myCode = identity?.groupCode || null;
   const inLeague = !!myCode;
@@ -1532,6 +1560,28 @@ export default function App() {
         {/* ---------------- LEADERBOARD ---------------- */}
         {view === "board" && (
           <div className="wc-fade">
+            {hasMovers && (
+              <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 14, marginBottom: 14, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".14em", color: C.mute, marginBottom: 10 }}>TODAY'S MOVERS</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {climbers.map((m) => (
+                    <div key={m.slug} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                      <TrendingUp size={15} color={C.green} />
+                      <span style={{ flex: 1, fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
+                      <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.green }}>▲ {m.delta}</span>
+                    </div>
+                  ))}
+                  {fallers.map((m) => (
+                    <div key={m.slug} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                      <TrendingDown size={15} color={C.coral} />
+                      <span style={{ flex: 1, fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
+                      <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.coral }}>▼ {Math.abs(m.delta)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 10.5, color: C.mute, marginTop: 9, opacity: .8 }}>Rank change since the start of the day (projected).</div>
+              </div>
+            )}
             {scopedPreds.length > 0 && (
               <>
               {hasLive && (
