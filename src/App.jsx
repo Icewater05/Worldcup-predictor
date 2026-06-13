@@ -177,6 +177,7 @@ const C = {
   text: "#1A1712", mute: "#6E6A60", green: "#C8901C", greenDim: "#B08D3A",
   gold: "#C8901C", coral: "#D9544A", blue: "#3E8FD6",
   grad: "linear-gradient(135deg,#F3D27A 0%,#E8B84B 55%,#C99A3B 100%)",
+  navbg: "rgba(251,250,247,.78)", soft: "rgba(20,20,25,.055)", scrim: "rgba(20,20,25,.2)", chip: "#fff", card: "rgba(255,255,255,.97)", pos: "#3E9E5E",
 };
 const GRAD_SHADOW = "0 12px 30px rgba(200,144,28,.30)";
 
@@ -305,7 +306,7 @@ function DragList({ items, onReorder, editable }) {
           <div key={team} className="wc-row" style={{
             position: "absolute", left: 0, right: 0, top, height: CARD_H,
             display: "flex", alignItems: "center", gap: 10, padding: "0 8px 0 8px",
-            background: advancing ? "rgba(232,184,75,.06)" : "rgba(20,20,25,.045)",
+            background: advancing ? "rgba(232,184,75,.06)" : C.soft,
             borderRadius: 12, border: `1px solid ${advancing ? "rgba(232,184,75,.22)" : C.line}`,
             transition: isDragging ? "none" : "top .22s cubic-bezier(.2,.8,.3,1), background .2s, border-color .2s",
             zIndex: isDragging ? 30 : 1,
@@ -446,7 +447,7 @@ function PhaseToggle({ phase, setPhase, koLocked }) {
     );
   };
   return (
-    <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: "rgba(20,20,25,.055)", border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 16 }}>
+    <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: C.soft, border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 16 }}>
       <Btn id="group" label="Group Stage" />
       <Btn id="knockout" label="Knockout" />
     </div>
@@ -508,7 +509,7 @@ function KnockoutBoard({ pool, ko, onToggle, editable, showFinals, finals, onTog
                         display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 12px",
                         borderRadius: 999, fontSize: 13.5, fontWeight: 700, cursor: editable && !full ? "pointer" : "default",
                         border: `1px solid ${on ? r.color : C.line}`,
-                        background: on ? r.color : "rgba(20,20,25,.045)",
+                        background: on ? r.color : C.soft,
                         color: on ? "#201700" : (full ? "rgba(139,157,150,.5)" : C.text),
                         opacity: full ? .5 : 1,
                       }}>
@@ -648,7 +649,7 @@ function BracketView({ koPool, actual, finals, myPicks, koOpen }) {
   ];
   return (
     <div className="wc-fade">
-      <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: "rgba(20,20,25,.055)", border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 14 }}>
+      <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: C.soft, border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 14 }}>
         {[["actual", "Actual results"], ["mine", "My picks"]].map(([id, label]) => (
           <button key={id} className="wc-btn" onClick={() => setMode(id)} style={{
             flex: 1, padding: "10px 8px", borderRadius: 12, border: "none", cursor: "pointer", fontWeight: 800, fontSize: 13,
@@ -1292,7 +1293,7 @@ export default function App() {
           </p>
 
           {/* stat strip */}
-          <div className="wc-glass" style={{ display: "flex", gap: 4, marginTop: 16, padding: 4, background: "rgba(20,20,25,.045)", border: `1px solid ${C.line}`, borderRadius: 14 }}>
+          <div className="wc-glass" style={{ display: "flex", gap: 4, marginTop: 16, padding: 4, background: C.soft, border: `1px solid ${C.line}`, borderRadius: 14 }}>
             {[["48", "TEAMS"], ["12", "GROUPS"], ["104", "MATCHES"], [`${204 + KO_MAX}`, "MAX PTS"]].map(([n, l], i) => (
               <div key={l} style={{ flex: 1, textAlign: "center", padding: "8px 2px", borderLeft: i ? `1px solid ${C.line}` : "none" }}>
                 <div className="wc-mono" style={{ fontSize: 19, fontWeight: 700, color: C.text, lineHeight: 1 }}>{n}</div>
@@ -1361,7 +1362,7 @@ export default function App() {
 
       {/* Tabs */}
       {session && !recovery && (
-      <nav className="wc-glass" style={{ display: "flex", gap: 5, padding: "8px 10px", position: "sticky", top: 0, zIndex: 20, background: "rgba(251,250,247,.78)", borderBottom: `1px solid ${C.line}` }}>
+      <nav className="wc-glass" style={{ display: "flex", gap: 5, padding: "8px 10px", position: "sticky", top: 0, zIndex: 20, background: C.navbg, borderBottom: `1px solid ${C.line}` }}>
         {[["predict", "Group Stage", Flag], ["bracket", "Knockout Stage", GitBranch], ["board", "Board", Trophy], ...(isAdmin ? [["results", "Results", ShieldCheck]] : [])].map(([id, label, Icon]) => {
           const TabIcon = (id === "bracket" && !knockout?.open) ? Lock : Icon;
           return (
@@ -1369,7 +1370,7 @@ export default function App() {
             flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
             padding: "11px 3px", borderRadius: 14, border: "none", cursor: "pointer",
             fontWeight: 800, fontSize: 11, whiteSpace: "nowrap",
-            background: view === id ? C.grad : "rgba(20,20,25,.055)",
+            background: view === id ? C.grad : C.soft,
             color: view === id ? "#201700" : C.mute,
             boxShadow: view === id ? GRAD_SHADOW : "none",
           }}><TabIcon size={13} style={{ flexShrink: 0 }} /> {label}</button>
@@ -1589,7 +1590,7 @@ export default function App() {
               {!committed && (
                 <div style={{
                   position: "absolute", inset: 0, zIndex: 5, display: "grid", placeItems: "center",
-                  background: "rgba(251,250,247,.78)", backdropFilter: "blur(2px)", borderRadius: 16, textAlign: "center",
+                  background: C.navbg, backdropFilter: "blur(2px)", borderRadius: 16, textAlign: "center",
                 }}>
                   <div style={{ color: C.mute, fontWeight: 700, fontSize: 14, padding: 20 }}>
                     ☝️ Enter your name to start ranking
@@ -1630,9 +1631,9 @@ export default function App() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {climbers.map((m) => (
                     <div key={m.slug} style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                      <TrendingUp size={15} color={C.green} />
+                      <TrendingUp size={15} color={C.pos} />
                       <span style={{ flex: 1, fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
-                      <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.green }}>▲ {m.delta}</span>
+                      <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.pos }}>▲ {m.delta}</span>
                     </div>
                   ))}
                   {fallers.map((m) => (
@@ -1649,7 +1650,7 @@ export default function App() {
             {scopedPreds.length > 0 && (
               <>
               {hasLive && (
-                <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: "rgba(20,20,25,.055)", border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 10 }}>
+                <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: C.soft, border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 10 }}>
                   {[["projected", "Projected"], ["official", "Official"]].map(([id, label]) => (
                     <button key={id} className="wc-btn" onClick={() => setBoardMode(id)} style={{
                       flex: 1, padding: "9px 8px", borderRadius: 12, border: "none", cursor: "pointer", fontWeight: 800, fontSize: 13,
@@ -1709,7 +1710,7 @@ export default function App() {
             <TrackerCard teamsLeft={teamsLeft} matchesLeft={matchesLeft} matchesPlayed={matchesPlayed} stageLabel={stageLabel} survivors={survivors} />
 
             {inLeague ? (
-              <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: "rgba(20,20,25,.055)", border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 14 }}>
+              <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: C.soft, border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 14 }}>
                 {[["global", "Global", Flag], ["league", identity.groupName || "My League", Users]].map(([id, label, Icon]) => {
                   const active = scope === id;
                   return (
@@ -1852,12 +1853,12 @@ export default function App() {
                   <span style={{ fontSize: 12, fontWeight: 600 }}>What everyone predicted. Qualifiers (top 2) are highlighted.</span>
                 </div>
 
-                <div style={{ display: "flex", gap: 6, padding: 5, background: "rgba(20,20,25,.055)", border: `1px solid ${C.line}`, borderRadius: 14, marginBottom: 14 }}>
+                <div style={{ display: "flex", gap: 6, padding: 5, background: C.soft, border: `1px solid ${C.line}`, borderRadius: 14, marginBottom: 14 }}>
                   {[["player", "By player", User], ["group", "By group", Users]].map(([id, label, Icon]) => (
                     <button key={id} className="wc-btn" onClick={() => setPeopleMode(id)} style={{
                       flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
                       padding: "9px 8px", borderRadius: 10, border: "none", cursor: "pointer", fontWeight: 800, fontSize: 12.5,
-                      background: peopleMode === id ? "#fff" : "transparent", color: peopleMode === id ? C.text : C.mute,
+                      background: peopleMode === id ? C.chip : "transparent", color: peopleMode === id ? C.text : C.mute,
                       boxShadow: peopleMode === id ? "0 2px 8px rgba(20,20,25,.08)" : "none",
                     }}><Icon size={14} /> {label}</button>
                   ))}
@@ -1966,7 +1967,7 @@ export default function App() {
 
                 <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${picksLocked ? C.coral : C.line}`, borderRadius: 18, padding: 16, marginBottom: 16, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ width: 38, height: 38, borderRadius: 11, background: picksLocked ? "rgba(217,84,74,.12)" : "rgba(20,20,25,.05)", border: `1px solid ${picksLocked ? C.coral : C.line}`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                    <div style={{ width: 38, height: 38, borderRadius: 11, background: picksLocked ? "rgba(217,84,74,.12)" : C.soft, border: `1px solid ${picksLocked ? C.coral : C.line}`, display: "grid", placeItems: "center", flexShrink: 0 }}>
                       {picksLocked ? <Lock size={18} color={C.coral} /> : <Unlock size={18} color={C.mute} />}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -1976,7 +1977,7 @@ export default function App() {
                     <button className="wc-btn" onClick={toggleLock} style={{
                       display: "inline-flex", alignItems: "center", gap: 7, border: "none",
                       borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", flexShrink: 0,
-                      background: picksLocked ? "rgba(20,20,25,.06)" : C.grad, color: picksLocked ? C.text : "#201700",
+                      background: picksLocked ? C.soft : C.grad, color: picksLocked ? C.text : "#201700",
                       boxShadow: picksLocked ? "none" : GRAD_SHADOW,
                     }}>
                       {picksLocked ? <><Unlock size={15} /> Unlock</> : <><Lock size={15} /> Lock picks</>}
@@ -2005,9 +2006,9 @@ export default function App() {
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                               {!fin && (
                                 <div style={{ display: "inline-flex", alignItems: "center", gap: 4, border: `1px solid ${C.line}`, borderRadius: 999, padding: "2px 4px" }}>
-                                  <button className="wc-btn" onClick={() => setPlayed(pl - 1)} style={{ width: 22, height: 22, borderRadius: 999, border: "none", background: "rgba(20,20,25,.06)", color: C.text, fontWeight: 800, fontSize: 15, cursor: "pointer", lineHeight: 1 }}>−</button>
+                                  <button className="wc-btn" onClick={() => setPlayed(pl - 1)} style={{ width: 22, height: 22, borderRadius: 999, border: "none", background: C.soft, color: C.text, fontWeight: 800, fontSize: 15, cursor: "pointer", lineHeight: 1 }}>−</button>
                                   <span className="wc-mono" style={{ fontSize: 11.5, fontWeight: 700, minWidth: 30, textAlign: "center", color: pl > 0 ? C.green : C.mute }}>{pl}/6</span>
-                                  <button className="wc-btn" onClick={() => setPlayed(pl + 1)} style={{ width: 22, height: 22, borderRadius: 999, border: "none", background: "rgba(20,20,25,.06)", color: C.text, fontWeight: 800, fontSize: 15, cursor: "pointer", lineHeight: 1 }}>+</button>
+                                  <button className="wc-btn" onClick={() => setPlayed(pl + 1)} style={{ width: 22, height: 22, borderRadius: 999, border: "none", background: C.soft, color: C.text, fontWeight: 800, fontSize: 15, cursor: "pointer", lineHeight: 1 }}>+</button>
                                 </div>
                               )}
                               <button className="wc-btn" onClick={() => setResultsDraft((d) => ({ ...d, [gk]: { ...d[gk], final: !d[gk].final, played: !d[gk].final ? 6 : d[gk].played } }))}
@@ -2063,7 +2064,7 @@ export default function App() {
                                   display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 12px", borderRadius: 999,
                                   fontSize: 13, fontWeight: 700, cursor: full ? "default" : "pointer",
                                   border: `1px solid ${on ? C.gold : C.line}`,
-                                  background: on ? C.gold : "rgba(20,20,25,.045)",
+                                  background: on ? C.gold : C.soft,
                                   color: on ? "#1a1500" : (full ? "rgba(139,157,150,.5)" : C.text), opacity: full ? .5 : 1,
                                 }}>
                                   <span style={{ fontSize: 10, fontWeight: 800, opacity: .7 }}>{GROUP_KEYS[idx]}</span>
@@ -2169,7 +2170,7 @@ export default function App() {
           display: "grid", placeItems: "center", padding: 16,
         }}>
           <div className="wc-pop wc-glass" onClick={(e) => e.stopPropagation()} style={{
-            background: "rgba(255,255,255,.97)", border: `1px solid ${C.line}`, borderRadius: 22, padding: 22, maxWidth: 440, width: "100%",
+            background: C.card, border: `1px solid ${C.line}`, borderRadius: 22, padding: 22, maxWidth: 440, width: "100%",
             boxShadow: "0 30px 80px rgba(20,20,25,.18)",
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
@@ -2230,7 +2231,7 @@ export default function App() {
 function ScoreLine({ icon: Icon, color, pts, label, sub }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: `1px solid ${C.line}` }}>
-      <div style={{ width: 38, height: 38, borderRadius: 10, display: "grid", placeItems: "center", background: "rgba(20,20,25,.055)", border: `1px solid ${C.line}`, flexShrink: 0 }}>
+      <div style={{ width: 38, height: 38, borderRadius: 10, display: "grid", placeItems: "center", background: C.soft, border: `1px solid ${C.line}`, flexShrink: 0 }}>
         <Icon size={18} color={color} />
       </div>
       <div style={{ flex: 1 }}>
