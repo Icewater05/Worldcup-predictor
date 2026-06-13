@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   GripVertical, Trophy, Check, Users, Save, Info, Copy, RefreshCw, Zap,
   X, Lock, Unlock, Crown, ShieldCheck, RotateCcw, Medal, Flag,
-  LogOut, Mail, GitBranch, Pencil, ChevronUp, ChevronDown, TrendingUp, Eye, User
+  LogOut, Mail, GitBranch, Pencil, ChevronUp, ChevronDown, TrendingUp, Eye, User, Share2
 } from "lucide-react";
 
 /* ----------------------------- DATA ----------------------------- */
@@ -1037,6 +1037,62 @@ export default function App() {
     flash(next ? "Group picks locked 🔒" : "Group picks unlocked 🔓");
   };
 
+  const shareMyPicks = async () => {
+    try {
+      const W = 1080, H = 1350;
+      const cv = document.createElement("canvas");
+      cv.width = W; cv.height = H;
+      const ctx = cv.getContext("2d");
+      ctx.fillStyle = "#FBFAF7"; ctx.fillRect(0, 0, W, H);
+      const grd = ctx.createLinearGradient(0, 0, W, 250);
+      grd.addColorStop(0, "#F3D27A"); grd.addColorStop(.55, "#E8B84B"); grd.addColorStop(1, "#C99A3B");
+      ctx.fillStyle = grd; ctx.fillRect(0, 0, W, 250);
+      ctx.fillStyle = "#201700";
+      ctx.font = "800 32px 'Plus Jakarta Sans', sans-serif";
+      ctx.fillText("MY WORLD CUP 2026 PICKS", 60, 105);
+      ctx.font = "800 64px 'Bricolage Grotesque','Plus Jakarta Sans',sans-serif";
+      ctx.fillText((identity?.name || "My picks").slice(0, 18), 60, 185);
+      let y = 330;
+      const champ = koPicks?.champion?.[0];
+      if (champ) {
+        ctx.fillStyle = "#1A1712"; ctx.font = "800 32px 'Plus Jakarta Sans',sans-serif";
+        ctx.fillText("🏆 Champion: " + (FLAG[champ] || "") + " " + champ, 60, y);
+        y += 72;
+      }
+      ctx.fillStyle = "#6E6A60"; ctx.font = "800 22px 'Plus Jakarta Sans',sans-serif";
+      ctx.fillText("PREDICTED GROUP WINNERS", 60, y); y += 54;
+      const colX = [60, 580];
+      GROUP_KEYS.forEach((g, i) => {
+        const x = colX[i < 6 ? 0 : 1];
+        const yy = y + (i % 6) * 82;
+        const w = picks[g]?.[0];
+        ctx.fillStyle = "#C8901C"; ctx.font = "800 24px 'Plus Jakarta Sans',sans-serif";
+        ctx.fillText("Group " + g, x, yy);
+        ctx.fillStyle = "#1A1712"; ctx.font = "700 30px 'Plus Jakarta Sans',sans-serif";
+        ctx.fillText(((FLAG[w] || "") + " " + (w || "—")).slice(0, 22), x, yy + 38);
+      });
+      ctx.fillStyle = "#6E6A60"; ctx.font = "600 24px 'Plus Jakarta Sans',sans-serif";
+      ctx.fillText("World Cup 2026 Predictor", 60, H - 56);
+      await new Promise((res) => cv.toBlob(async (blob) => {
+        if (!blob) { res(); return; }
+        const file = new File([blob], "my-wc-picks.png", { type: "image/png" });
+        try {
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: "My World Cup 2026 picks" });
+            res(); return;
+          }
+        } catch {}
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = "my-wc-picks.png";
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        res();
+      }, "image/png"));
+    } catch {
+      flash("Couldn't make the image on this device");
+    }
+  };
+
   // ----- leaderboard math -----
   const finalGroups = results ? GROUP_KEYS.filter((k) => results[k]?.final && results[k].order?.length === 4) : [];
   // a group counts as "live" for projections once it's final or has at least
@@ -1461,6 +1517,14 @@ export default function App() {
                 borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: GRAD_SHADOW,
               }}><Save size={18} /> Save my group picks</button>
+            )}
+
+            {committed && (
+              <button className="wc-btn" onClick={shareMyPicks} style={{
+                width: "100%", marginTop: 10, background: "rgba(232,184,75,.10)", color: C.gold, border: `1px solid ${C.line}`,
+                borderRadius: 14, padding: "14px", fontWeight: 800, fontSize: 14.5, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              }}><Share2 size={17} /> Share my picks</button>
             )}
           </div>
         )}
