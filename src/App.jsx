@@ -518,7 +518,7 @@ function TrackerCard({ teamsLeft, matchesLeft, matchesPlayed, stageLabel, surviv
   );
 }
 
-function AuthGate({ mode, setMode, email, setEmail, pw, setPw, error, notice, busy, onSignIn, onSignUp, ready }) {
+function AuthGate({ mode, setMode, email, setEmail, pw, setPw, error, notice, busy, onSignIn, onSignUp, onForgot, ready }) {
   const isSignup = mode === "signup";
   const submit = () => (isSignup ? onSignUp() : onSignIn());
   const inputStyle = { width: "100%", marginTop: 6, background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px 12px", color: C.text, fontSize: 15, fontWeight: 600 };
@@ -557,6 +557,11 @@ function AuthGate({ mode, setMode, email, setEmail, pw, setPw, error, notice, bu
       <button className="wc-btn" onClick={() => setMode(isSignup ? "signin" : "signup")} style={{
         width: "100%", marginTop: 10, background: "transparent", color: C.mute, border: "none", fontWeight: 700, fontSize: 12.5, cursor: "pointer",
       }}>{isSignup ? "Already have an account? Sign in" : "New here? Create an account"}</button>
+      {!isSignup && (
+        <button className="wc-btn" onClick={() => onForgot()} disabled={busy} style={{
+          width: "100%", marginTop: 2, background: "transparent", color: C.blue, border: "none", fontWeight: 700, fontSize: 12.5, cursor: "pointer",
+        }}>Forgot password?</button>
+      )}
     </div>
   );
 }
@@ -646,6 +651,8 @@ export default function App() {
   const [session, setSession] = useState(null);   // Supabase auth session (or null)
   const [authReady, setAuthReady] = useState(false);
   const [authMode, setAuthMode] = useState("signin"); // "signin" | "signup"
+  const [recovery, setRecovery] = useState(false); // password-reset (PASSWORD_RECOVERY) flow
+  const [newPw, setNewPw] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPw, setAuthPw] = useState("");
   const [authError, setAuthError] = useState("");
@@ -758,6 +765,7 @@ export default function App() {
       setAuthReady(true);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, sess) => {
+      if (_e === "PASSWORD_RECOVERY") setRecovery(true);
       setSession(sess || null);
       if (sess?.user) { loadProfile(sess.user); loadAll(); }
       else { setIdentity(null); setCommitted(false); setName(""); setPicks(freshPicks()); setKoPicks(emptyKo()); }
@@ -779,6 +787,25 @@ export default function App() {
     if (error) setAuthError(error.message);
     else if (!data.session) setAuthNotice("Check your email to confirm your account, then sign in.");
     setAuthBusy(false);
+  };
+  const forgotPw = async () => {
+    if (!supabase) return;
+    const em = authEmail.trim();
+    if (!em) { setAuthError("Enter your email above first, then tap Forgot password."); return; }
+    setAuthBusy(true); setAuthError(""); setAuthNotice("");
+    const { error } = await supabase.auth.resetPasswordForEmail(em, { redirectTo: window.location.origin });
+    if (error) setAuthError(error.message);
+    else setAuthNotice("If that email has an account, a reset link is on its way. Open it on this device to set a new password.");
+    setAuthBusy(false);
+  };
+  const submitNewPw = async () => {
+    if (!supabase) return;
+    if (newPw.length < 6) { setAuthError("Password must be at least 6 characters."); return; }
+    setAuthBusy(true); setAuthError("");
+    const { error } = await supabase.auth.updateUser({ password: newPw });
+    setAuthBusy(false);
+    if (error) { setAuthError(error.message); return; }
+    setRecovery(false); setNewPw(""); setAuthNotice("Password updated — you're all set.");
   };
   const signOut = async () => {
     if (supabase) await supabase.auth.signOut();
@@ -1185,7 +1212,7 @@ export default function App() {
       </header>
 
       {/* Tabs */}
-      {session && (
+      {session && !recovery && (
       <nav className="wc-glass" style={{ display: "flex", gap: 5, padding: "8px 10px", position: "sticky", top: 0, zIndex: 20, background: "rgba(251,250,247,.78)", borderBottom: `1px solid ${C.line}` }}>
         {[["predict", "Group Stage", Flag], ["bracket", "Knockout Stage", GitBranch], ["board", "Board", Trophy], ...(isAdmin ? [["results", "Results", ShieldCheck]] : [])].map(([id, label, Icon]) => {
           const TabIcon = (id === "bracket" && !knockout?.open) ? Lock : Icon;
@@ -1209,13 +1236,37 @@ export default function App() {
             <RefreshCw size={26} className="wc-spin" style={{ margin: "0 auto" }} />
             <p style={{ marginTop: 12, fontWeight: 600, fontSize: 14 }}>Loading…</p>
           </div>
+        ) : recovery ? (
+          <div className="wc-fade wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 22, padding: 22, maxWidth: 420, margin: "8px auto", boxShadow: "0 10px 30px rgba(20,20,25,.08)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: C.grad, display: "grid", placeItems: "center", boxShadow: GRAD_SHADOW }}>
+                <Lock size={20} color="#201700" />
+              </div>
+              <div>
+                <div className="wc-display" style={{ fontSize: 22, lineHeight: 1 }}>Set a new password</div>
+                <div style={{ fontSize: 12, color: C.mute, fontWeight: 600 }}>Choose a new password for your account</div>
+              </div>
+            </div>
+            <div style={{ marginTop: 14 }}>
+              <label style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: C.mute, display: "flex", alignItems: "center", gap: 6 }}><Lock size={13} /> NEW PASSWORD</label>
+              <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder="••••••••"
+                onKeyDown={(e) => e.key === "Enter" && submitNewPw()}
+                style={{ width: "100%", marginTop: 6, background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px", color: C.text, fontSize: 15, fontWeight: 600 }} />
+            </div>
+            {authError && <p style={{ fontSize: 12, color: C.coral, fontWeight: 700, margin: "10px 0 0" }}>{authError}</p>}
+            <button className="wc-btn" onClick={submitNewPw} disabled={authBusy || newPw.length < 6} style={{
+              width: "100%", marginTop: 16, background: C.grad, color: "#201700", border: "none", borderRadius: 12,
+              padding: "14px", fontWeight: 800, fontSize: 15, cursor: authBusy ? "default" : "pointer", boxShadow: GRAD_SHADOW,
+              opacity: authBusy || newPw.length < 6 ? .6 : 1,
+            }}>{authBusy ? "…" : "Update password"}</button>
+          </div>
         ) : !session ? (
           <AuthGate
             mode={authMode} setMode={setAuthMode}
             email={authEmail} setEmail={setAuthEmail}
             pw={authPw} setPw={setAuthPw}
             error={authError} notice={authNotice} busy={authBusy}
-            onSignIn={signIn} onSignUp={signUp} ready={!!supabase}
+            onSignIn={signIn} onSignUp={signUp} onForgot={forgotPw} ready={!!supabase}
           />
         ) : (
         <>
