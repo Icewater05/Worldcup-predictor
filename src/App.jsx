@@ -365,7 +365,7 @@ function TodayMatches({ data }) {
                 ) : final ? (
                   <span style={{ fontSize: 9.5, fontWeight: 800, color: C.mute }}>FULL TIME</span>
                 ) : (
-                  <span style={{ fontSize: 9.5, fontWeight: 800, color: C.blue }}>{m.etTime ? `${m.etTime} ET` : "TBD"}</span>
+                  <span style={{ fontSize: 9.5, fontWeight: 800, color: C.blue }}>{m.time ? `${m.time} PT` : "TBD"}</span>
                 )}
               </div>
               {[["home", hw], ["away", aw]].map(([side, win], idx) => (
@@ -384,7 +384,7 @@ function TodayMatches({ data }) {
           );
         })}
       </div>
-      <p style={{ fontSize: 10.5, color: C.mute, margin: "6px 2px 0", opacity: .8 }}>Kickoff times in US Eastern (ET).</p>
+      <p style={{ fontSize: 10.5, color: C.mute, margin: "6px 2px 0", opacity: .8 }}>Kickoff times in US Pacific (PT).</p>
     </div>
   );
 }
