@@ -1125,11 +1125,6 @@ export default function App() {
     await writeBracket(next);
     flash(next.locked ? "Bracket locked 🔒" : "Bracket unlocked 🔓");
   };
-  const loadSampleBracket = async () => {
-    if (!window.confirm("Load a SAMPLE 32-team field for testing? This is fake seeding so you can try the fill flow.")) return;
-    await writeBracket({ seeds: SAMPLE_BRACKET, locked: false });
-    flash("Sample bracket loaded — open the Knockout tab to try it");
-  };
   const clearBracket = async () => {
     if (!window.confirm("Clear the bracket field? Everyone's bracket picks remain saved but the field is removed.")) return;
     await store.del(BRACKET_KEY);
@@ -2142,11 +2137,7 @@ export default function App() {
                     </div>
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {!bracket?.seeds?.length ? (
-                      <button className="wc-btn" onClick={loadSampleBracket} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: C.grad, color: "#201700", boxShadow: GRAD_SHADOW }}>
-                        Load sample bracket (test)
-                      </button>
-                    ) : (
+                    {bracket?.seeds?.length ? (
                       <>
                         <button className="wc-btn" onClick={toggleBracketLock} style={{
                           display: "inline-flex", alignItems: "center", gap: 7, border: "none", borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer",
@@ -2156,7 +2147,7 @@ export default function App() {
                           <RotateCcw size={14} /> Clear field
                         </button>
                       </>
-                    )}
+                    ) : null}
                   </div>
                   <p style={{ fontSize: 10.5, color: C.mute, margin: "10px 0 0", opacity: .8 }}>
                     Stage 1: fill flow + lock. Scoring and auto-seeding from real results come next.
