@@ -2171,6 +2171,7 @@ export default function App() {
         }}>
           <div className="wc-pop wc-glass" onClick={(e) => e.stopPropagation()} style={{
             background: C.card, border: `1px solid ${C.line}`, borderRadius: 22, padding: 22, maxWidth: 440, width: "100%",
+            maxHeight: "88vh", overflowY: "auto", WebkitOverflowScrolling: "touch",
             boxShadow: "0 30px 80px rgba(20,20,25,.18)",
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
@@ -2190,20 +2191,29 @@ export default function App() {
 
             <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "20px 0 6px" }}>
               <Trophy size={16} color={C.gold} />
-              <h3 className="wc-display" style={{ fontSize: 18, margin: 0 }}>Knockout stage</h3>
+              <h3 className="wc-display" style={{ fontSize: 18, margin: 0 }}>Knockout bracket</h3>
             </div>
-            <p style={{ color: C.mute, fontSize: 13, marginTop: 0 }}>Group points carry over. You then pick who survives each round — points per team that actually reaches it:</p>
-            {KO_ROUNDS.map((r) => (
-              <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: `1px solid ${C.line}` }}>
+            <p style={{ color: C.mute, fontSize: 13, marginTop: 0 }}>
+              When the group stage ends, you'll fill out the full 32-team bracket — Round of 32 all the way to the champion. You score a round whenever a team you advanced actually reaches it (slot-based), with later rounds worth more:
+            </p>
+            {[
+              { label: "Round of 32", count: 16, pts: 3, color: "#9AA0A6" },
+              { label: "Round of 16", count: 8, pts: 5, color: "#7FB5E6" },
+              { label: "Quarterfinals", count: 4, pts: 9, color: "#5FC076" },
+              { label: "Semifinals", count: 2, pts: 16, color: "#E0A34A" },
+              { label: "Champion (wins Final)", count: 1, pts: 30, color: "#F4D98A" },
+              { label: "Champion bonus", count: 0, pts: 18, color: C.gold },
+            ].map((r) => (
+              <div key={r.label} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: `1px solid ${C.line}` }}>
                 <span style={{ width: 10, height: 10, borderRadius: 3, background: r.color, flexShrink: 0 }} />
-                <div style={{ flex: 1, fontWeight: 700, fontSize: 14 }}>{r.label}<span style={{ color: C.mute, fontWeight: 600 }}> · {r.count} {r.count === 1 ? "team" : "teams"}</span></div>
+                <div style={{ flex: 1, fontWeight: 700, fontSize: 14 }}>{r.label}{r.count > 0 && <span style={{ color: C.mute, fontWeight: 600 }}> · {r.count} {r.count === 1 ? "pick" : "picks"}</span>}</div>
                 <div className="wc-mono" style={{ fontWeight: 700, fontSize: 16, color: r.color }}>+{r.pts}</div>
               </div>
             ))}
             <div style={{ marginTop: 12, padding: 12, background: C.panel2, borderRadius: 10, border: `1px solid ${C.line}` }}>
-              <div className="wc-mono" style={{ fontSize: 13, color: C.gold, fontWeight: 700 }}>Knockout — {KO_MAX} max · {204 + KO_MAX} grand total</div>
+              <div className="wc-mono" style={{ fontSize: 13, color: C.gold, fontWeight: 700 }}>Bracket — 204 max · 408 grand total</div>
               <p style={{ fontSize: 12, color: C.mute, margin: "6px 0 0" }}>
-                Each knockout round scores only after the host marks it <b>Official</b>.
+                The bracket is worth as much as the group stage, so the knockouts can decide the title. Picks lock before the Round of 32 kicks off — and if a team you advanced loses, the picks that needed them score nothing.
               </p>
             </div>
           </div>
