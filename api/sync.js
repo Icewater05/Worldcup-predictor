@@ -191,8 +191,8 @@ export default async function handler(req, res) {
     }
     nextKo.actual = normalizeKo(nextKo.actual);
 
-    // today's matches (validated, team names normalized, hard-filtered to today's Pacific date)
-    const todayMatches = (Array.isArray(json.today) ? json.today : []).map((m) => {
+    // today's matches (validated, team names normalized)
+    const todayRaw = (Array.isArray(json.today) ? json.today : []).map((m) => {
       const home = resolveTeam(m.home), away = resolveTeam(m.away);
       if (!home || !away) return null;
       const status = ["upcoming", "live", "final"].includes(m.status) ? m.status : "upcoming";
@@ -204,12 +204,14 @@ export default async function handler(req, res) {
         out.homeGoals = Number(m.homeGoals); out.awayGoals = Number(m.awayGoals);
       }
       return out;
-    }).filter(Boolean)
-      // keep only matches whose Pacific date is today (when a date is provided)
-      .filter((m) => !m._date || m._date === ptYMD)
-      // order the day: finished first, then live, then upcoming
+    }).filter(Boolean);
+    // prefer only today's Pacific date, but if that would blank the strip (date format
+    // mismatch), keep the model's list rather than showing nothing
+    let todayMatches = todayRaw.filter((m) => m._date === ptYMD);
+    if (todayMatches.length === 0) todayMatches = todayRaw;
+    todayMatches = todayMatches
       .sort((a, b) => ({ final: 0, live: 1, upcoming: 2 }[a.status] - { final: 0, live: 1, upcoming: 2 }[b.status]))
-      .map(({ _date, ...rest }) => rest); // drop helper field before storing
+      .map(({ _date, ...rest }) => rest);
     const todayPayload = { date: ptDate, matches: todayMatches };
 
     // ---- persist ----
