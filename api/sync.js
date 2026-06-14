@@ -84,16 +84,17 @@ export default async function handler(req, res) {
 
     const teamsByGroup = Object.entries(GROUPS).map(([k, t]) => `${k}: ${t.join(", ")}`).join("; ");
     const ptDate = new Date().toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric" });
+    const ptYMD = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }); // YYYY-MM-DD in Pacific
     const prompt =
       `You have a web search tool. The 2026 FIFA World Cup is underway (today is ${new Date().toDateString()}). ` +
       `Search the web for the latest results AND today's schedule — search several times if needed (e.g. "World Cup 2026 results today", "World Cup 2026 schedule today", specific group fixtures). ` +
       `Then reply with ONLY a single minified JSON object — no prose, no markdown, no backticks. ALWAYS return valid JSON even if nothing has finished yet (use empty arrays). Schema: ` +
       `{"matches":[{"group":"<A-L>","home":"<team>","away":"<team>","homeGoals":<int>,"awayGoals":<int>}],` +
-      `"today":[{"group":"<A-L or empty>","home":"<team>","away":"<team>","status":"upcoming|live|final","time":"<kickoff in US Pacific like 10:00 AM>","minute":"<e.g. 63'>","homeGoals":<int>,"awayGoals":<int>}],` +
+      `"today":[{"date":"<YYYY-MM-DD US Pacific kickoff date>","group":"<A-L or empty>","home":"<team>","away":"<team>","status":"upcoming|live|final","time":"<kickoff in US Pacific like 10:00 AM>","minute":"<e.g. 63'>","homeGoals":<int>,"awayGoals":<int>}],` +
       `"knockout":{"r16":[teams that reached the Round of 16],"qf":[...],"sf":[...],"final":[...],"champion":[...]},` +
       `"thirds":[up to 8 third-place teams that advanced]}. ` +
       `In "matches" include ONLY matches that have FINISHED (full-time) with their final score; omit fixtures not yet kicked off or still in progress. ` +
-      `In "today" list ALL matches scheduled for today (${ptDate}) in US Pacific time, each with status and "time" = its kickoff time in US Pacific (PT); include "minute" only if live, and homeGoals/awayGoals only if live or final. If there are no matches today, use an empty array. ` +
+      `In "today" list EVERY match whose kickoff date in US Pacific is EXACTLY ${ptYMD} (${ptDate}) — this MUST include matches that have already finished earlier today (status "final" with score), matches in progress (status "live" with minute and score), and matches still to come today (status "upcoming"). Set each item's "date" to its US Pacific kickoff date (YYYY-MM-DD). Do NOT include any match on a different date (no tomorrow, no yesterday). If there are no matches today, use an empty array. ` +
       `Use EXACTLY these team names and the correct group letter for each (group: teams) — ${teamsByGroup}. ` +
       `For knockout arrays, include a team only once it has confirmed reached that round; otherwise []. Reply with only the JSON object.`;
 
@@ -190,19 +191,25 @@ export default async function handler(req, res) {
     }
     nextKo.actual = normalizeKo(nextKo.actual);
 
-    // today's matches (validated + team names normalized)
+    // today's matches (validated, team names normalized, hard-filtered to today's Pacific date)
     const todayMatches = (Array.isArray(json.today) ? json.today : []).map((m) => {
       const home = resolveTeam(m.home), away = resolveTeam(m.away);
       if (!home || !away) return null;
       const status = ["upcoming", "live", "final"].includes(m.status) ? m.status : "upcoming";
       const out = { group: typeof m.group === "string" ? m.group.toUpperCase().slice(0, 6) : "", home, away, status };
+      if (m.date) out._date = String(m.date).slice(0, 10);
       if (m.time) out.time = String(m.time).slice(0, 12);
       if (status === "live" && m.minute) out.minute = String(m.minute).slice(0, 6);
       if (status !== "upcoming" && Number.isFinite(Number(m.homeGoals)) && Number.isFinite(Number(m.awayGoals))) {
         out.homeGoals = Number(m.homeGoals); out.awayGoals = Number(m.awayGoals);
       }
       return out;
-    }).filter(Boolean);
+    }).filter(Boolean)
+      // keep only matches whose Pacific date is today (when a date is provided)
+      .filter((m) => !m._date || m._date === ptYMD)
+      // order the day: finished first, then live, then upcoming
+      .sort((a, b) => ({ final: 0, live: 1, upcoming: 2 }[a.status] - { final: 0, live: 1, upcoming: 2 }[b.status]))
+      .map(({ _date, ...rest }) => rest); // drop helper field before storing
     const todayPayload = { date: ptDate, matches: todayMatches };
 
     // ---- persist ----
