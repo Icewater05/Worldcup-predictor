@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   GripVertical, Trophy, Check, Users, Save, Info, Copy, RefreshCw, Zap,
   X, Lock, Unlock, Crown, ShieldCheck, RotateCcw, Medal, Flag,
-  LogOut, Mail, GitBranch, Pencil, ChevronUp, ChevronDown, TrendingUp, TrendingDown, Eye, User, Share2, Calendar
+  LogOut, Mail, GitBranch, Pencil, ChevronUp, ChevronDown, ChevronRight, TrendingUp, TrendingDown, Eye, User, Share2, Calendar
 } from "lucide-react";
 
 /* ----------------------------- DATA ----------------------------- */
@@ -148,6 +148,7 @@ const GROUP_PREFIX = "wc26:group:";
 const LOCK_KEY = "wc26:locked";
 const MOVERS_KEY = "wc26:movers";
 const TODAY_KEY = "wc26:today";
+const BRACKET_KEY = "wc26:bracket";
 const CODE = {
   "France": "FRA", "Spain": "ESP", "Argentina": "ARG", "England": "ENG", "Portugal": "POR", "Brazil": "BRA",
   "Morocco": "MAR", "Netherlands": "NED", "Belgium": "BEL", "Germany": "GER", "Senegal": "SEN", "Ecuador": "ECU",
@@ -403,6 +404,103 @@ function PickRow({ order }) {
           <span style={{ fontSize: 13 }}>{FLAG[t]}</span>{t}
         </span>
       ))}
+    </div>
+  );
+}
+
+const BR_ROUNDS = ["Round of 32", "Round of 16", "Quarterfinals", "Semifinals", "Final"];
+const BR_COUNTS = [16, 8, 4, 2, 1];
+const BR_TOTAL = 31;
+function brSanitize(p) {
+  const out = { ...p };
+  for (let r = 1; r < 5; r++) {
+    for (let m = 0; m < BR_COUNTS[r]; m++) {
+      const a = out[`${r - 1}_${2 * m}`], b = out[`${r - 1}_${2 * m + 1}`];
+      const key = `${r}_${m}`;
+      if (out[key] && out[key] !== a && out[key] !== b) delete out[key];
+    }
+  }
+  return out;
+}
+const brCompetitors = (seeds, p, r, m) => (r === 0 ? (seeds[m] || [null, null]) : [p[`${r - 1}_${2 * m}`], p[`${r - 1}_${2 * m + 1}`]]);
+// sample field for host testing before the real 32 are known
+const SAMPLE_BRACKET = [
+  ["France", "Senegal"], ["Japan", "Mexico"], ["Spain", "Uruguay"], ["Croatia", "United States"],
+  ["Argentina", "Morocco"], ["Netherlands", "Germany"], ["England", "Belgium"], ["Portugal", "Brazil"],
+  ["Norway", "Ecuador"], ["Colombia", "Switzerland"], ["Canada", "Egypt"], ["Korea Republic", "Austria"],
+  ["Türkiye", "Iran"], ["Ghana", "Australia"], ["Paraguay", "Sweden"], ["Scotland", "Uzbekistan"],
+];
+
+function BracketColumns({ seeds, picks, onPick, locked }) {
+  const [r, setR] = useState(0);
+  const champ = picks["4_0"];
+  const made = Object.keys(picks).filter((k) => picks[k]).length;
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, background: C.panel, border: `1px solid ${champ ? C.gold : C.line}`, borderRadius: 14, padding: "11px 14px", marginBottom: 12, boxShadow: "0 6px 18px rgba(20,20,25,.05)" }}>
+        <Trophy size={20} color={C.gold} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".1em", color: C.mute }}>YOUR CHAMPION</div>
+          <div style={{ fontWeight: 800, fontSize: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{champ ? `${FLAG[champ] || ""} ${champ}` : "—"}</div>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div className="wc-mono" style={{ fontWeight: 800, fontSize: 15, color: made === BR_TOTAL ? C.pos : C.text }}>{made}/{BR_TOTAL}</div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: C.mute }}>picks</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 14, paddingBottom: 4 }}>
+        {BR_ROUNDS.map((rn, i) => {
+          const done = Object.keys(picks).filter((k) => k.startsWith(`${i}_`) && picks[k]).length;
+          const full = done === BR_COUNTS[i];
+          return (
+            <button key={rn} className="wc-btn" onClick={() => setR(i)} style={{
+              flex: "0 0 auto", display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 999, border: "none", cursor: "pointer", fontWeight: 800, fontSize: 12,
+              background: r === i ? C.grad : "transparent", color: r === i ? "#201700" : C.mute, boxShadow: r === i ? GRAD_SHADOW : "none",
+            }}>{rn}{full && <Check size={13} color={r === i ? "#201700" : C.pos} />}</button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {Array.from({ length: BR_COUNTS[r] }).map((_, m) => {
+          const [a, b] = brCompetitors(seeds, picks, r, m);
+          const pick = picks[`${r}_${m}`];
+          return (
+            <div key={m} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 8, boxShadow: "0 6px 16px rgba(20,20,25,.05)" }}>
+              <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".1em", color: C.mute, padding: "2px 4px 7px" }}>{r === 4 ? "THE FINAL" : `MATCH ${m + 1}`}</div>
+              {[a, b].map((team, s) => {
+                if (!team) {
+                  return (
+                    <div key={s} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 10, border: `1px dashed ${C.line}`, color: C.mute, fontSize: 12.5, fontWeight: 600, marginTop: s ? 6 : 0, opacity: .8 }}>
+                      Pick Match {2 * m + s + 1} in {BR_ROUNDS[r - 1]} first
+                    </div>
+                  );
+                }
+                const on = pick === team;
+                return (
+                  <button key={s} className="wc-btn" disabled={locked} onClick={() => !locked && onPick(r, m, team)} style={{
+                    display: "flex", alignItems: "center", gap: 8, padding: "11px 12px", borderRadius: 10, cursor: locked ? "default" : "pointer", width: "100%", textAlign: "left", marginTop: s ? 6 : 0,
+                    border: `1px solid ${on ? C.gold : C.line}`, background: on ? "rgba(232,184,75,.16)" : "transparent",
+                    fontWeight: on ? 800 : 600, fontSize: 14.5, color: C.text, opacity: locked && !on ? .55 : 1,
+                  }}>
+                    <span style={{ fontSize: 19 }}>{FLAG[team] || "🏳️"}</span>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{team}</span>
+                    {on && <Check size={16} color={C.gold} />}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+
+      {!locked && r < 4 && Object.keys(picks).filter((k) => k.startsWith(`${r}_`) && picks[k]).length === BR_COUNTS[r] && (
+        <button className="wc-btn" onClick={() => setR(r + 1)} style={{
+          width: "100%", marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+          background: C.grad, color: "#201700", border: "none", borderRadius: 12, padding: "13px", fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: GRAD_SHADOW,
+        }}>Next: {BR_ROUNDS[r + 1]} <ChevronRight size={16} /></button>
+      )}
     </div>
   );
 }
@@ -716,6 +814,8 @@ export default function App() {
   const [moversSnap, setMoversSnap] = useState(null); // daily standings baseline for "movers"
   const [moversLoaded, setMoversLoaded] = useState(false);
   const [today, setToday] = useState(null); // { date, matches:[...] } from sync
+  const [bracket, setBracket] = useState(null); // shared: { seeds:[[a,b]x16], locked }
+  const [koBracket, setKoBracket] = useState({}); // this user's bracket picks { "r_m": team }
   const [newPw, setNewPw] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPw, setAuthPw] = useState("");
@@ -789,6 +889,8 @@ export default function App() {
     setMoversLoaded(true);
     const td = await store.get(TODAY_KEY);
     if (td?.value) { try { setToday(JSON.parse(td.value)); } catch {} }
+    const bk = await store.get(BRACKET_KEY);
+    if (bk?.value) { try { setBracket(JSON.parse(bk.value)); } catch {} } else { setBracket(null); }
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
@@ -821,6 +923,7 @@ export default function App() {
         const rec = JSON.parse(pr.value);
         if (rec.groups) setPicks(rec.groups);
         if (rec.ko) setKoPicks(normalizeKo(rec.ko));
+        if (rec.koBracket) setKoBracket(rec.koBracket);
       } catch {}
     }
   }, []);
@@ -837,7 +940,7 @@ export default function App() {
       if (_e === "PASSWORD_RECOVERY") setRecovery(true);
       setSession(sess || null);
       if (sess?.user) { loadProfile(sess.user); loadAll(); }
-      else { setIdentity(null); setCommitted(false); setName(""); setPicks(freshPicks()); setKoPicks(emptyKo()); }
+      else { setIdentity(null); setCommitted(false); setName(""); setPicks(freshPicks()); setKoPicks(emptyKo()); setKoBracket({}); }
     });
     return () => sub?.subscription?.unsubscribe?.();
   }, [loadProfile, loadAll]);
@@ -991,6 +1094,47 @@ export default function App() {
     setKnockout(koDraft);
     await loadAll();
     flash("Knockout updated — scores recalculated");
+  };
+
+  // ----- knockout bracket (new) -----
+  const handleBracketPick = (r, m, team) => {
+    if (bracket?.locked) return;
+    setKoBracket((prev) => brSanitize({ ...prev, [`${r}_${m}`]: team }));
+  };
+  const saveBracket = async () => {
+    if (!identity) return;
+    if (bracket?.locked) { flash("The bracket is locked by the host 🔒"); return; }
+    const s = identity.slug;
+    let rec = {};
+    const ex = await store.get(PRED_PREFIX + s);
+    if (ex?.value) { try { rec = JSON.parse(ex.value); } catch {} }
+    rec.slug = s; rec.name = identity.name; rec.ownerToken = identity.token; rec.groupCode = identity.groupCode || null;
+    if (!rec.groups) rec.groups = picks;
+    if (!rec.ko) rec.ko = normalizeKo(koPicks);
+    rec.koBracket = koBracket;
+    if (!rec.submittedAt) rec.submittedAt = Date.now();
+    await store.set(PRED_PREFIX + s, JSON.stringify(rec));
+    await loadAll();
+    flash("Bracket saved 🏆");
+  };
+  // host controls
+  const writeBracket = async (next) => { await store.set(BRACKET_KEY, JSON.stringify(next)); setBracket(next); };
+  const toggleBracketLock = async () => {
+    const next = { seeds: bracket?.seeds || [], locked: !(bracket?.locked) };
+    if (next.locked && !window.confirm("Lock the bracket? Players won't be able to change their picks until you unlock.")) return;
+    await writeBracket(next);
+    flash(next.locked ? "Bracket locked 🔒" : "Bracket unlocked 🔓");
+  };
+  const loadSampleBracket = async () => {
+    if (!window.confirm("Load a SAMPLE 32-team field for testing? This is fake seeding so you can try the fill flow.")) return;
+    await writeBracket({ seeds: SAMPLE_BRACKET, locked: false });
+    flash("Sample bracket loaded — open the Knockout tab to try it");
+  };
+  const clearBracket = async () => {
+    if (!window.confirm("Clear the bracket field? Everyone's bracket picks remain saved but the field is removed.")) return;
+    await store.del(BRACKET_KEY);
+    setBracket(null);
+    flash("Bracket field cleared");
   };
 
   // Auto-fill results from the live web via the built-in AI + web search
@@ -1985,6 +2129,40 @@ export default function App() {
                   </div>
                 </div>
 
+                <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${bracket?.locked ? C.gold : C.line}`, borderRadius: 18, padding: 16, marginBottom: 16, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: bracket?.seeds?.length ? 12 : 0 }}>
+                    <div style={{ width: 38, height: 38, borderRadius: 11, background: "rgba(232,184,75,.12)", border: `1px solid ${C.gold}`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                      <GitBranch size={18} color={C.gold} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 800, fontSize: 14 }}>Knockout bracket</div>
+                      <div style={{ fontSize: 11.5, color: C.mute }}>
+                        {bracket?.seeds?.length ? `${bracket.seeds.length} matchups seeded · ${bracket.locked ? "locked" : "open for picks"}` : "No field yet — load a sample to test, or wait for the group stage to end."}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {!bracket?.seeds?.length ? (
+                      <button className="wc-btn" onClick={loadSampleBracket} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: C.grad, color: "#201700", boxShadow: GRAD_SHADOW }}>
+                        Load sample bracket (test)
+                      </button>
+                    ) : (
+                      <>
+                        <button className="wc-btn" onClick={toggleBracketLock} style={{
+                          display: "inline-flex", alignItems: "center", gap: 7, border: "none", borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer",
+                          background: bracket.locked ? C.soft : C.grad, color: bracket.locked ? C.text : "#201700", boxShadow: bracket.locked ? "none" : GRAD_SHADOW,
+                        }}>{bracket.locked ? <><Unlock size={15} /> Unlock bracket</> : <><Lock size={15} /> Lock bracket</>}</button>
+                        <button className="wc-btn" onClick={clearBracket} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: "transparent", color: C.mute }}>
+                          <RotateCcw size={14} /> Clear field
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  <p style={{ fontSize: 10.5, color: C.mute, margin: "10px 0 0", opacity: .8 }}>
+                    Stage 1: fill flow + lock. Scoring and auto-seeding from real results come next.
+                  </p>
+                </div>
+
                 <PhaseToggle phase={phase} setPhase={setPhase} koLocked={false} />
 
                 {phase === "group" && (
@@ -2122,39 +2300,39 @@ export default function App() {
         {/* ---------------- BRACKET ---------------- */}
         {view === "bracket" && (
           <div className="wc-fade">
-            {!knockout?.open ? (
+            {!(bracket?.seeds?.length) ? (
               <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 24, textAlign: "center", color: C.mute }}>
                 <Lock size={28} style={{ margin: "0 auto", opacity: .7 }} />
-                <div style={{ fontWeight: 800, fontSize: 16, color: C.text, marginTop: 10 }}>Knockout stage locked</div>
+                <div style={{ fontWeight: 800, fontSize: 16, color: C.text, marginTop: 10 }}>Knockout bracket unlocks soon</div>
                 <p style={{ marginTop: 8, fontSize: 13.5, fontWeight: 600, maxWidth: 360, marginLeft: "auto", marginRight: "auto" }}>
-                  This opens once the group stage wraps up and the host launches the bracket. Your group-stage points carry over.
+                  When the group stage wraps up and the 32 teams are set, the host opens the bracket and you'll fill it out here. Your group-stage points carry over.
                 </p>
+              </div>
+            ) : !committed ? (
+              <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 18, textAlign: "center", color: C.mute, fontSize: 13, fontWeight: 600 }}>
+                Set your name on the Group Stage tab to fill out your bracket.
               </div>
             ) : (
               <>
-                {committed && identity ? (
-                  <div style={{ marginBottom: 22 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7, color: C.mute, fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>
-                      <Trophy size={15} style={{ color: C.gold }} />
-                      Tap teams to advance them through each round, down to your champion.
-                    </div>
-                    <KnockoutBoard pool={koPool} ko={koPicks} onToggle={toggleKoPick} editable />
-                    {koPool.length >= 32 && (
-                      <button className="wc-btn" onClick={submit} style={{
-                        width: "100%", marginTop: 18, background: C.grad, color: "#201700", border: "none",
-                        borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: "pointer",
-                        display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: GRAD_SHADOW,
-                      }}><Save size={18} /> Save my knockout picks</button>
-                    )}
+                {bracket.locked ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "12px 14px", borderRadius: 14, marginBottom: 14, background: "rgba(232,184,75,.10)", border: `1px solid ${C.gold}` }}>
+                    <Lock size={16} color={C.gold} style={{ flexShrink: 0 }} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>The bracket is locked — these are your final picks.</span>
                   </div>
                 ) : (
-                  <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 18, marginBottom: 22, textAlign: "center", color: C.mute, fontSize: 13, fontWeight: 600 }}>
-                    Set your name on the Group Stage tab to make knockout picks.
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, color: C.mute, fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>
+                    <Trophy size={15} style={{ color: C.gold }} />
+                    Tap who advances in each matchup, round by round, down to your champion.
                   </div>
                 )}
-
-                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".16em", color: C.mute, margin: "4px 0 10px" }}>THE BRACKET</div>
-                <BracketView koPool={koPool} actual={koActual} finals={koFinals} myPicks={koPicks} koOpen={!!knockout?.open} />
+                <BracketColumns seeds={bracket.seeds} picks={koBracket} onPick={handleBracketPick} locked={!!bracket.locked} />
+                {!bracket.locked && (
+                  <button className="wc-btn" onClick={saveBracket} style={{
+                    width: "100%", marginTop: 18, background: C.grad, color: "#201700", border: "none",
+                    borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: GRAD_SHADOW,
+                  }}><Save size={18} /> Save my bracket</button>
+                )}
               </>
             )}
           </div>
