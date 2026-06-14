@@ -1335,27 +1335,17 @@ export default function App() {
     };
   }).sort((a, b) => b.total - a.total || a.submittedAt - b.submittedAt);
 
-  // ----- daily movers (rank change since the start of the day) -----
-  const moversRanking = [...standings].sort((a, b) => b.totalProjected - a.totalProjected || (a.submittedAt || 0) - (b.submittedAt || 0));
-  const todayStr = new Date().toISOString().slice(0, 10);
+  // ----- daily movers: capture a once-a-day baseline of everyone's projected total -----
+  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }); // Pacific YYYY-MM-DD
   useEffect(() => {
-    if (!storageReady || !moversLoaded || moversRanking.length === 0) return;
-    if (moversSnap?.baselineDay === todayStr) return; // already captured today's baseline
+    if (!storageReady || !moversLoaded || standings.length === 0) return;
+    if (moversSnap?.baselineDay === todayStr && moversSnap?.v === 2) return; // today's baseline already saved
     const baseline = {};
-    moversRanking.forEach((p, i) => { baseline[p.slug] = i + 1; });
-    const snap = { baselineDay: todayStr, baseline };
+    standings.forEach((p) => { baseline[p.slug] = p.totalProjected; });
+    const snap = { v: 2, baselineDay: todayStr, baseline };
     setMoversSnap(snap);
     store.set(MOVERS_KEY, JSON.stringify(snap));
-  }, [storageReady, moversLoaded, moversRanking.length, moversSnap, todayStr]);
-  const moversList = moversSnap?.baseline
-    ? moversRanking.map((p, i) => {
-        const base = moversSnap.baseline[p.slug];
-        return base ? { slug: p.slug, name: p.name, delta: base - (i + 1) } : null;
-      }).filter((m) => m && m.delta !== 0)
-    : [];
-  const climbers = moversList.filter((m) => m.delta > 0).sort((a, b) => b.delta - a.delta).slice(0, 3);
-  const fallers = moversList.filter((m) => m.delta < 0).sort((a, b) => a.delta - b.delta).slice(0, 3);
-  const hasMovers = climbers.length > 0 || fallers.length > 0;
+  }, [storageReady, moversLoaded, standings.length, moversSnap, todayStr]);
 
   // league scope
   const myCode = identity?.groupCode || null;
@@ -1363,6 +1353,22 @@ export default function App() {
   const useLeague = scope === "league" && inLeague;
   const scopedStandings = useLeague ? standings.filter((p) => p.groupCode === myCode) : standings;
   const scopedPreds = useLeague ? allPreds.filter((p) => p.groupCode === myCode) : allPreds;
+
+  // movers = rank change WITHIN the current view (global or league) vs today's baseline totals
+  const moversBase = moversSnap?.v === 2 ? moversSnap.baseline : null;
+  let moversList = [];
+  if (moversBase) {
+    const eligible = scopedStandings.filter((p) => moversBase[p.slug] != null); // already in current order
+    const curRank = {}; eligible.forEach((p, i) => { curRank[p.slug] = i + 1; });
+    const baseRank = {};
+    [...eligible].sort((a, b) => (moversBase[b.slug] - moversBase[a.slug]) || ((a.submittedAt || 0) - (b.submittedAt || 0)))
+      .forEach((p, i) => { baseRank[p.slug] = i + 1; });
+    moversList = eligible.map((p) => ({ slug: p.slug, name: p.name, delta: baseRank[p.slug] - curRank[p.slug] }))
+      .filter((m) => m.delta !== 0);
+  }
+  const climbers = moversList.filter((m) => m.delta > 0).sort((a, b) => b.delta - a.delta).slice(0, 3);
+  const fallers = moversList.filter((m) => m.delta < 0).sort((a, b) => a.delta - b.delta).slice(0, 3);
+  const hasMovers = climbers.length > 0 || fallers.length > 0;
 
   // pool of 32 qualifiers (uses saved third-place selection)
   const koPool = poolOf32(results, knockout?.thirds);
