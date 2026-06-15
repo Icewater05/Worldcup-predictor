@@ -444,16 +444,15 @@ function scoreBracket(koBracket, results) {
   return total;
 }
 
-const ALL_TEAMS = Object.keys(FLAG).sort();
-
 function BracketSeedEditor({ seeds, onSave, onCancel }) {
-  const [draft, setDraft] = useState(seeds.map((p) => [p[0] || ALL_TEAMS[0], p[1] || ALL_TEAMS[1]]));
+  const teamOpts = [...ALL_TEAMS].sort();
+  const [draft, setDraft] = useState(seeds.map((p) => [p[0] || teamOpts[0], p[1] || teamOpts[1]]));
   const setSlot = (i, s, val) => setDraft((d) => d.map((pair, idx) => (idx === i ? (s === 0 ? [val, pair[1]] : [pair[0], val]) : pair)));
   const sel = (i, s) => (
     <select value={draft[i][s]} onChange={(e) => setSlot(i, s, e.target.value)} style={{
       flex: 1, minWidth: 0, padding: "8px 6px", borderRadius: 9, border: `1px solid ${C.line}`, background: C.chip, color: C.text, fontWeight: 700, fontSize: 13,
     }}>
-      {ALL_TEAMS.map((t) => <option key={t} value={t}>{t}</option>)}
+      {teamOpts.map((t) => <option key={t} value={t}>{t}</option>)}
     </select>
   );
   return (
