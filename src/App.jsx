@@ -431,6 +431,37 @@ const SAMPLE_BRACKET = [
   ["Türkiye", "Iran"], ["Ghana", "Australia"], ["Paraguay", "Sweden"], ["Scotland", "Uzbekistan"],
 ];
 
+// slot-based bracket scoring: a pick scores if that team actually reached that round
+function scoreBracket(koBracket, results) {
+  if (!koBracket || !results) return 0;
+  const PTS = [3, 5, 9, 16];
+  const reached = [results.reachedR16, results.reachedQF, results.reachedSF, results.reachedFinal].map((a) => new Set(a || []));
+  let total = 0;
+  for (let r = 0; r < 4; r++) {
+    for (let m = 0; m < BR_COUNTS[r]; m++) {
+      const t = koBracket[`${r}_${m}`];
+      if (t && reached[r].has(t)) total += PTS[r];
+    }
+  }
+  const champPick = koBracket["4_0"];
+  if (champPick && results.champion && champPick === results.champion) total += 30; // champion wins it all (any opponent)
+  const f1 = koBracket["3_0"], f2 = koBracket["3_1"]; // your two predicted finalists
+  const finalSet = new Set(results.reachedFinal || []);
+  if (f1 && f2 && finalSet.has(f1) && finalSet.has(f2)) total += 18; // nailed BOTH finalists (regardless of winner)
+  return total;
+}
+// deterministic sample actual-results (higher power rank advances) — for host testing only
+function sampleResults(seeds) {
+  const better = (a, b) => ((RANK[a] || 99) <= (RANK[b] || 99) ? a : b);
+  const nextRound = (arr) => { const out = []; for (let i = 0; i < arr.length; i += 2) out.push(better(arr[i], arr[i + 1])); return out; };
+  const reachedR16 = seeds.map(([a, b]) => better(a, b));
+  const reachedQF = nextRound(reachedR16);
+  const reachedSF = nextRound(reachedQF);
+  const reachedFinal = nextRound(reachedSF);
+  const champion = nextRound(reachedFinal)[0];
+  return { reachedR16, reachedQF, reachedSF, reachedFinal, champion };
+}
+
 function BracketColumns({ seeds, picks, onPick, locked }) {
   const [r, setR] = useState(0);
   const champ = picks["4_0"];
@@ -835,6 +866,7 @@ export default function App() {
   const [knockout, setKnockout] = useState(null);  // shared: { open, thirds, actual, finals }
   const [koDraft, setKoDraft] = useState({ open: false, thirds: [], actual: emptyKo(), finals: {} });
   const [scope, setScope] = useState("global"); // leaderboard scope: "league" | "global"
+  const [boardView, setBoardView] = useState("overall"); // standings metric: "overall" | "bracket"
   const [boardMode, setBoardMode] = useState("projected"); // "projected" | "official"
   const [picksLocked, setPicksLocked] = useState(false); // host-controlled group-pick lock
   const [peopleMode, setPeopleMode] = useState("player"); // everyone's-picks browser: "player" | "group"
@@ -1131,6 +1163,11 @@ export default function App() {
     setBracket(null);
     flash("Bracket field cleared");
   };
+  const loadSampleTest = async () => {
+    if (!window.confirm("Load a SAMPLE 32-team field WITH fake results, so you can see bracket scoring on the Board? Fill your bracket afterward to see points.")) return;
+    await writeBracket({ seeds: SAMPLE_BRACKET, locked: false, results: sampleResults(SAMPLE_BRACKET) });
+    flash("Sample field + results loaded — fill your bracket, then check the Board");
+  };
 
   // Auto-fill results from the live web via the built-in AI + web search
   const autoSync = async () => {
@@ -1327,11 +1364,14 @@ export default function App() {
     const ks = scoreKnockout(p.ko, koActual, koFinals);
     const totalOfficial = groupPtsOfficial + ks.points;
     const totalProjected = groupPtsProjected + ks.points;
+    const brPts = scoreBracket(p.koBracket, bracket?.results);
+    const activeTotal = projecting ? totalProjected : totalOfficial;
     return {
       ...p, koPts: ks.points, koPer: ks.per, per, perProj,
       groupPts: projecting ? groupPtsProjected : groupPtsOfficial,
-      total: projecting ? totalProjected : totalOfficial,
+      total: activeTotal,
       totalOfficial, totalProjected,
+      brPts, combined: activeTotal + brPts,
     };
   }).sort((a, b) => b.total - a.total || a.submittedAt - b.submittedAt);
 
@@ -1339,13 +1379,15 @@ export default function App() {
   const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }); // Pacific YYYY-MM-DD
   useEffect(() => {
     if (!storageReady || !moversLoaded || standings.length === 0) return;
-    if (moversSnap?.baselineDay === todayStr && moversSnap?.v === 2) return; // today's baseline already saved
+    const anyScored = standings.some((p) => (p.totalProjected || 0) > 0);
+    if (!anyScored) return; // never set a baseline before there's any scoring (avoids a meaningless all-zero start)
+    if (moversSnap?.baselineDay === todayStr && moversSnap?.v === 3) return; // today's baseline already saved
     const baseline = {};
     standings.forEach((p) => { baseline[p.slug] = p.totalProjected; });
-    const snap = { v: 2, baselineDay: todayStr, baseline };
+    const snap = { v: 3, baselineDay: todayStr, baseline };
     setMoversSnap(snap);
     store.set(MOVERS_KEY, JSON.stringify(snap));
-  }, [storageReady, moversLoaded, standings.length, moversSnap, todayStr]);
+  }, [storageReady, moversLoaded, standings, moversSnap, todayStr]);
 
   // league scope
   const myCode = identity?.groupCode || null;
@@ -1354,8 +1396,16 @@ export default function App() {
   const scopedStandings = useLeague ? standings.filter((p) => p.groupCode === myCode) : standings;
   const scopedPreds = useLeague ? allPreds.filter((p) => p.groupCode === myCode) : allPreds;
 
+  // bracket-aware board: "overall" (group + bracket) or "bracket" (bracket only)
+  const bracketActive = !!(bracket?.seeds?.length);
+  const bv = bracketActive ? boardView : "overall";
+  const viewMetric = (p) => (bv === "bracket" ? (p.brPts || 0) : (p.combined != null ? p.combined : p.total));
+  const viewStandings = bracketActive
+    ? [...scopedStandings].sort((a, b) => viewMetric(b) - viewMetric(a) || (a.submittedAt || 0) - (b.submittedAt || 0))
+    : scopedStandings;
+
   // movers = rank change WITHIN the current view (global or league) vs today's baseline totals
-  const moversBase = moversSnap?.v === 2 ? moversSnap.baseline : null;
+  const moversBase = moversSnap?.v === 3 ? moversSnap.baseline : null;
   let moversList = [];
   if (moversBase) {
     const eligible = scopedStandings.filter((p) => moversBase[p.slug] != null); // already in current order
@@ -1805,14 +1855,25 @@ export default function App() {
                   ))}
                 </div>
               )}
+              {bracketActive && (
+                <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: C.soft, border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 10 }}>
+                  {[["overall", "Overall"], ["bracket", "Bracket only"]].map(([id, label]) => (
+                    <button key={id} className="wc-btn" onClick={() => setBoardView(id)} style={{
+                      flex: 1, padding: "9px 8px", borderRadius: 12, border: "none", cursor: "pointer", fontWeight: 800, fontSize: 13,
+                      background: boardView === id ? C.grad : "transparent", color: boardView === id ? "#201700" : C.mute,
+                      boxShadow: boardView === id ? GRAD_SHADOW : "none",
+                    }}>{label}</button>
+                  ))}
+                </div>
+              )}
               <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${projecting ? C.gold : C.line}`, borderRadius: 18, padding: "8px 6px 6px", marginBottom: projecting ? 8 : 14, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 12px 8px" }}>
                   <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".16em", color: C.mute }}>
-                    {projecting ? "PROJECTED STANDINGS" : "STANDINGS"}{useLeague ? " · " + (identity.groupName || "League") : ""}
+                    {bv === "bracket" ? "BRACKET STANDINGS" : projecting ? "PROJECTED STANDINGS" : "STANDINGS"}{useLeague ? " · " + (identity.groupName || "League") : ""}
                   </span>
-                  {projecting && <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 9.5, fontWeight: 800, color: C.green }}><span className="wc-pulse" /> LIVE</span>}
+                  {projecting && bv !== "bracket" && <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 9.5, fontWeight: 800, color: C.green }}><span className="wc-pulse" /> LIVE</span>}
                 </div>
-                {scopedStandings.map((p, i) => {
+                {viewStandings.map((p, i) => {
                   const medal = i === 0 ? C.gold : i === 1 ? "#9AA0A6" : i === 2 ? "#CD7F4A" : C.mute;
                   const me = identity && p.slug === identity.slug;
                   return (
@@ -1825,27 +1886,30 @@ export default function App() {
                       <span style={{ flex: 1, fontWeight: 700, fontSize: 15, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {p.name}{me ? " (you)" : ""}
                       </span>
-                      <span className="wc-mono" style={{ fontWeight: 700, fontSize: 15, color: i === 0 ? C.gold : C.text }}>{p.total} pts</span>
+                      <span className="wc-mono" style={{ fontWeight: 700, fontSize: 15, color: i === 0 ? C.gold : C.text }}>{viewMetric(p)} pts</span>
                     </div>
                   );
                 })}
               </div>
-              {projecting && (() => {
-                const yi = scopedStandings.findIndex((p) => identity && p.slug === identity.slug);
+              {(projecting || bracketActive) && (() => {
+                const yi = viewStandings.findIndex((p) => identity && p.slug === identity.slug);
                 if (yi < 0) return null;
                 const ord = ["1st","2nd","3rd","4th","5th","6th","7th","8th","9th","10th"][yi] || `${yi + 1}th`;
-                const me = scopedStandings[yi], above = scopedStandings[yi - 1], below = scopedStandings[yi + 1];
+                const me = viewStandings[yi], above = viewStandings[yi - 1], below = viewStandings[yi + 1];
+                const tag = bv === "bracket" ? "bracket" : projecting ? "projected" : "official";
                 return (
                   <div style={{ marginBottom: 14, padding: "0 2px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: C.text, fontWeight: 700 }}>
-                      <TrendingUp size={14} color={C.gold} /> You're {ord} of {scopedStandings.length} (projected)
+                      <TrendingUp size={14} color={C.gold} /> You're {ord} of {viewStandings.length} ({tag})
                     </div>
                     <p style={{ fontSize: 12, color: C.mute, fontWeight: 600, margin: "4px 0 0" }}>
-                      {above ? `${above.total - me.total} pt behind ${above.name}` : "leading the pool"}{below ? `, ${me.total - below.total} ahead of ${below.name}` : ""}.
+                      {above ? `${viewMetric(above) - viewMetric(me)} pt behind ${above.name}` : "leading the pool"}{below ? `, ${viewMetric(me) - viewMetric(below)} ahead of ${below.name}` : ""}.
                     </p>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11.5, color: C.coral, fontWeight: 700, marginTop: 8 }}>
-                      <Info size={13} /> Provisional — shifts as matches end, and counts only once groups are final.
-                    </div>
+                    {projecting && bv !== "bracket" && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11.5, color: C.coral, fontWeight: 700, marginTop: 8 }}>
+                        <Info size={13} /> Provisional — shifts as matches end, and counts only once groups are final.
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -2143,7 +2207,11 @@ export default function App() {
                     </div>
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {bracket?.seeds?.length ? (
+                    {!bracket?.seeds?.length ? (
+                      <button className="wc-btn" onClick={loadSampleTest} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: C.grad, color: "#201700", boxShadow: GRAD_SHADOW }}>
+                        Load sample field + results (test)
+                      </button>
+                    ) : (
                       <>
                         <button className="wc-btn" onClick={toggleBracketLock} style={{
                           display: "inline-flex", alignItems: "center", gap: 7, border: "none", borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer",
@@ -2153,10 +2221,10 @@ export default function App() {
                           <RotateCcw size={14} /> Clear field
                         </button>
                       </>
-                    ) : null}
+                    )}
                   </div>
                   <p style={{ fontSize: 10.5, color: C.mute, margin: "10px 0 0", opacity: .8 }}>
-                    Stage 1: fill flow + lock. Scoring and auto-seeding from real results come next.
+                    Stage 2 (testing): sample loader fills a field + fake results so you can see bracket scoring on the Board. Real seeding from live results comes in Stage 3.
                   </p>
                 </div>
 
@@ -2376,8 +2444,8 @@ export default function App() {
               { label: "Round of 16", count: 8, pts: 5, color: "#7FB5E6" },
               { label: "Quarterfinals", count: 4, pts: 9, color: "#5FC076" },
               { label: "Semifinals", count: 2, pts: 16, color: "#E0A34A" },
-              { label: "Champion (wins Final)", count: 1, pts: 30, color: "#F4D98A" },
-              { label: "Champion bonus", count: 0, pts: 18, color: C.gold },
+              { label: "Champion (wins it all)", count: 1, pts: 30, color: "#F4D98A" },
+              { label: "Final matchup (both finalists right)", count: 0, pts: 18, color: C.gold },
             ].map((r) => (
               <div key={r.label} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: `1px solid ${C.line}` }}>
                 <span style={{ width: 10, height: 10, borderRadius: 3, background: r.color, flexShrink: 0 }} />
@@ -2388,7 +2456,7 @@ export default function App() {
             <div style={{ marginTop: 12, padding: 12, background: C.panel2, borderRadius: 10, border: `1px solid ${C.line}` }}>
               <div className="wc-mono" style={{ fontSize: 13, color: C.gold, fontWeight: 700 }}>Bracket — 204 max · 408 grand total</div>
               <p style={{ fontSize: 12, color: C.mute, margin: "6px 0 0" }}>
-                The bracket is worth as much as the group stage, so the knockouts can decide the title. Picks lock before the Round of 32 kicks off — and if a team you advanced loses, the picks that needed them score nothing.
+                The bracket is worth as much as the group stage, so the knockouts can decide the title. The +30 (your champion wins it all) and +18 (you picked both finalists) are independent — earn either or both. Picks lock before the Round of 32 kicks off, and if a team you advanced loses, the picks that needed them score nothing.
               </p>
             </div>
           </div>
