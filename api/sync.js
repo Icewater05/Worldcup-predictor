@@ -93,6 +93,7 @@ export default async function handler(req, res) {
       `{"matches":[{"group":"<A-L>","home":"<team>","away":"<team>","homeGoals":<int>,"awayGoals":<int>}],` +
       `"today":[{"date":"<YYYY-MM-DD US Pacific kickoff date>","group":"<A-L or empty>","home":"<team>","away":"<team>","status":"upcoming|live|final","time":"<kickoff in US Pacific like 10:00 AM>","minute":"<e.g. 63'>","homeGoals":<int>,"awayGoals":<int>}],` +
       `"knockout":{"r16":[teams that reached the Round of 16],"qf":[...],"sf":[...],"final":[...],"champion":[...]},` +
+      `"r32":[[homeTeam,awayTeam] for each of the 16 Round-of-32 matchups, in bracket order, ONLY once the knockout bracket is officially set after the group stage; otherwise omit or use []],` +
       `"thirds":[up to 8 third-place teams that advanced]}. ` +
       `In "matches" include ONLY matches that have FINISHED (full-time) with their final score; omit fixtures not yet kicked off or still in progress. ` +
       `In "today" list EVERY match whose kickoff date in US Pacific is EXACTLY ${ptYMD} — include matches that already finished earlier today (status "final" with score), matches in progress (status "live" with minute and score), and matches still to come today (status "upcoming"). Set each item's "date" to "${ptYMD}". Do NOT include any match whose Pacific date is not ${ptYMD} (no tomorrow, no yesterday). If no matches fall on ${ptYMD}, use an empty array. ` +
@@ -192,6 +193,35 @@ export default async function handler(req, res) {
     }
     nextKo.actual = normalizeKo(nextKo.actual);
 
+    // ---- knockout bracket (Stage 3): seed the 32 + derive results for slot-based scoring ----
+    const prevBracketRaw = await kvGet(SUPA_URL, "wc26:bracket", supaHeaders);
+    let prevBracket = {}; try { prevBracket = prevBracketRaw ? JSON.parse(prevBracketRaw) : {}; } catch {}
+    // parse R32 matchups from the model (16 valid pairs of known teams)
+    const r32raw = Array.isArray(json.r32) ? json.r32 : [];
+    const r32 = r32raw.map((pair) => {
+      if (!Array.isArray(pair) || pair.length !== 2) return null;
+      const a = resolveTeam(pair[0]), b = resolveTeam(pair[1]);
+      return a && b ? [a, b] : null;
+    }).filter(Boolean);
+    // only auto-seed when the host hasn't already seeded/corrected a field,
+    // AND only once every group is mathematically final (hard gate against premature seeding)
+    const haveExistingSeeds = Array.isArray(prevBracket.seeds) && prevBracket.seeds.length === 16;
+    const seeds = haveExistingSeeds
+      ? prevBracket.seeds
+      : (allFinal && r32.length === 16 ? r32 : (prevBracket.seeds || []));
+    // results for scoring: reached-sets straight from the knockout data
+    const bracketResults = {
+      reachedR16: nextKo.actual.r16 || [], reachedQF: nextKo.actual.qf || [],
+      reachedSF: nextKo.actual.sf || [], reachedFinal: nextKo.actual.final || [],
+      champion: (nextKo.actual.champion || [])[0] || null,
+    };
+    const hasRealKo = bracketResults.reachedR16.length > 0 || !!bracketResults.champion;
+    const nextBracket = {
+      seeds,
+      locked: !!prevBracket.locked,
+      results: hasRealKo ? bracketResults : (prevBracket.results || bracketResults), // don't wipe existing/test results before real knockout data
+    };
+
     // today's matches (validated, team names normalized)
     const todayRaw = (Array.isArray(json.today) ? json.today : []).map((m) => {
       const home = resolveTeam(m.home), away = resolveTeam(m.away);
@@ -216,9 +246,10 @@ export default async function handler(req, res) {
     // ---- persist ----
     await kvSet(SUPA_URL, "wc26:results", JSON.stringify(nextResults), supaHeaders);
     await kvSet(SUPA_URL, "wc26:knockout", JSON.stringify(nextKo), supaHeaders);
+    await kvSet(SUPA_URL, "wc26:bracket", JSON.stringify(nextBracket), supaHeaders);
     await kvSet(SUPA_URL, "wc26:today", JSON.stringify(todayPayload), supaHeaders);
 
-    return res.status(200).json({ ok: true, groupsSet, koRounds, todayCount: todayMatches.length, syncedAt: Date.now() });
+    return res.status(200).json({ ok: true, groupsSet, koRounds, seeded: seeds.length, todayCount: todayMatches.length, syncedAt: Date.now() });
   } catch (e) {
     return res.status(200).json({ ok: false, error: String((e && e.message) || e) });
   }

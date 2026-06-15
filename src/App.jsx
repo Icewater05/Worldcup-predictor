@@ -423,13 +423,6 @@ function brSanitize(p) {
   return out;
 }
 const brCompetitors = (seeds, p, r, m) => (r === 0 ? (seeds[m] || [null, null]) : [p[`${r - 1}_${2 * m}`], p[`${r - 1}_${2 * m + 1}`]]);
-// sample field for host testing before the real 32 are known
-const SAMPLE_BRACKET = [
-  ["France", "Senegal"], ["Japan", "Mexico"], ["Spain", "Uruguay"], ["Croatia", "United States"],
-  ["Argentina", "Morocco"], ["Netherlands", "Germany"], ["England", "Belgium"], ["Portugal", "Brazil"],
-  ["Norway", "Ecuador"], ["Colombia", "Switzerland"], ["Canada", "Egypt"], ["Korea Republic", "Austria"],
-  ["Türkiye", "Iran"], ["Ghana", "Australia"], ["Paraguay", "Sweden"], ["Scotland", "Uzbekistan"],
-];
 
 // slot-based bracket scoring: a pick scores if that team actually reached that round
 function scoreBracket(koBracket, results) {
@@ -450,16 +443,38 @@ function scoreBracket(koBracket, results) {
   if (f1 && f2 && finalSet.has(f1) && finalSet.has(f2)) total += 18; // nailed BOTH finalists (regardless of winner)
   return total;
 }
-// deterministic sample actual-results (higher power rank advances) — for host testing only
-function sampleResults(seeds) {
-  const better = (a, b) => ((RANK[a] || 99) <= (RANK[b] || 99) ? a : b);
-  const nextRound = (arr) => { const out = []; for (let i = 0; i < arr.length; i += 2) out.push(better(arr[i], arr[i + 1])); return out; };
-  const reachedR16 = seeds.map(([a, b]) => better(a, b));
-  const reachedQF = nextRound(reachedR16);
-  const reachedSF = nextRound(reachedQF);
-  const reachedFinal = nextRound(reachedSF);
-  const champion = nextRound(reachedFinal)[0];
-  return { reachedR16, reachedQF, reachedSF, reachedFinal, champion };
+
+const ALL_TEAMS = Object.keys(FLAG).sort();
+
+function BracketSeedEditor({ seeds, onSave, onCancel }) {
+  const [draft, setDraft] = useState(seeds.map((p) => [p[0] || ALL_TEAMS[0], p[1] || ALL_TEAMS[1]]));
+  const setSlot = (i, s, val) => setDraft((d) => d.map((pair, idx) => (idx === i ? (s === 0 ? [val, pair[1]] : [pair[0], val]) : pair)));
+  const sel = (i, s) => (
+    <select value={draft[i][s]} onChange={(e) => setSlot(i, s, e.target.value)} style={{
+      flex: 1, minWidth: 0, padding: "8px 6px", borderRadius: 9, border: `1px solid ${C.line}`, background: C.chip, color: C.text, fontWeight: 700, fontSize: 13,
+    }}>
+      {ALL_TEAMS.map((t) => <option key={t} value={t}>{t}</option>)}
+    </select>
+  );
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".1em", color: C.mute, marginBottom: 8 }}>EDIT ROUND-OF-32 MATCHUPS</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: 360, overflowY: "auto", paddingRight: 2 }}>
+        {draft.map((pair, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span className="wc-mono" style={{ width: 22, fontSize: 11, color: C.mute, flexShrink: 0 }}>{i + 1}</span>
+            {sel(i, 0)}
+            <span style={{ fontSize: 11, color: C.mute, fontWeight: 700, flexShrink: 0 }}>vs</span>
+            {sel(i, 1)}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        <button className="wc-btn" onClick={() => onSave(draft)} style={{ flex: 1, border: "none", borderRadius: 11, padding: "11px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: C.grad, color: "#201700", boxShadow: GRAD_SHADOW }}>Save field</button>
+        <button className="wc-btn" onClick={onCancel} style={{ border: `1px solid ${C.line}`, borderRadius: 11, padding: "11px 16px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: "transparent", color: C.mute }}>Cancel</button>
+      </div>
+    </div>
+  );
 }
 
 function BracketColumns({ seeds, picks, onPick, locked }) {
@@ -847,6 +862,7 @@ export default function App() {
   const [today, setToday] = useState(null); // { date, matches:[...] } from sync
   const [bracket, setBracket] = useState(null); // shared: { seeds:[[a,b]x16], locked }
   const [koBracket, setKoBracket] = useState({}); // this user's bracket picks { "r_m": team }
+  const [editingSeeds, setEditingSeeds] = useState(false); // host: editing the R32 field
   const [newPw, setNewPw] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPw, setAuthPw] = useState("");
@@ -1163,10 +1179,10 @@ export default function App() {
     setBracket(null);
     flash("Bracket field cleared");
   };
-  const loadSampleTest = async () => {
-    if (!window.confirm("Load a SAMPLE 32-team field WITH fake results, so you can see bracket scoring on the Board? Fill your bracket afterward to see points.")) return;
-    await writeBracket({ seeds: SAMPLE_BRACKET, locked: false, results: sampleResults(SAMPLE_BRACKET) });
-    flash("Sample field + results loaded — fill your bracket, then check the Board");
+  const saveSeeds = async (newSeeds) => {
+    await writeBracket({ ...(bracket || {}), seeds: newSeeds });
+    setEditingSeeds(false);
+    flash("Bracket field updated");
   };
 
   // Auto-fill results from the live web via the built-in AI + web search
@@ -2207,24 +2223,26 @@ export default function App() {
                     </div>
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {!bracket?.seeds?.length ? (
-                      <button className="wc-btn" onClick={loadSampleTest} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: C.grad, color: "#201700", boxShadow: GRAD_SHADOW }}>
-                        Load sample field + results (test)
-                      </button>
-                    ) : (
+                    {!bracket?.seeds?.length ? null : (
                       <>
                         <button className="wc-btn" onClick={toggleBracketLock} style={{
                           display: "inline-flex", alignItems: "center", gap: 7, border: "none", borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer",
                           background: bracket.locked ? C.soft : C.grad, color: bracket.locked ? C.text : "#201700", boxShadow: bracket.locked ? "none" : GRAD_SHADOW,
                         }}>{bracket.locked ? <><Unlock size={15} /> Unlock bracket</> : <><Lock size={15} /> Lock bracket</>}</button>
+                        <button className="wc-btn" onClick={() => setEditingSeeds((v) => !v)} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: editingSeeds ? C.soft : "transparent", color: C.text }}>
+                          <Pencil size={14} /> {editingSeeds ? "Close editor" : "Edit field"}
+                        </button>
                         <button className="wc-btn" onClick={clearBracket} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: "transparent", color: C.mute }}>
                           <RotateCcw size={14} /> Clear field
                         </button>
                       </>
                     )}
                   </div>
+                  {editingSeeds && bracket?.seeds?.length === 16 && (
+                    <BracketSeedEditor seeds={bracket.seeds} onSave={saveSeeds} onCancel={() => setEditingSeeds(false)} />
+                  )}
                   <p style={{ fontSize: 10.5, color: C.mute, margin: "10px 0 0", opacity: .8 }}>
-                    Stage 2 (testing): sample loader fills a field + fake results so you can see bracket scoring on the Board. Real seeding from live results comes in Stage 3.
+                    The sync auto-seeds the real 32 (and round results) when the group stage ends — then use Edit field to correct any team before locking.
                   </p>
                 </div>
 
