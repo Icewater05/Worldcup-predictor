@@ -412,6 +412,17 @@ const BR_ROUNDS = ["Round of 32", "Round of 16", "Quarterfinals", "Semifinals", 
 const BR_COUNTS = [16, 8, 4, 2, 1];
 const BR_TOTAL = 31;
 const BLANK16 = Array.from({ length: 16 }, () => ["", ""]); // empty field template for manual create
+// Official 2026 World Cup Round of 32, in correct bracket order (rows 1&2 feed the same R16 match, etc.)
+const OFFICIAL_R32 = [
+  ["Germany", "Paraguay"], ["France", "Sweden"],
+  ["South Africa", "Canada"], ["Netherlands", "Morocco"],
+  ["Portugal", "Croatia"], ["Spain", "Austria"],
+  ["United States", "Bosnia & Herzegovina"], ["Belgium", "Senegal"],
+  ["Brazil", "Japan"], ["Ivory Coast", "Norway"],
+  ["Mexico", "Ecuador"], ["England", "DR Congo"],
+  ["Argentina", "Cape Verde"], ["Australia", "Egypt"],
+  ["Switzerland", "Algeria"], ["Colombia", "Ghana"],
+];
 function brSanitize(p) {
   const out = { ...p };
   for (let r = 1; r < 5; r++) {
@@ -1268,6 +1279,12 @@ export default function App() {
     await writeBracket({ ...(bracket || {}), seeds: newSeeds });
     setEditingSeeds(false);
     flash("Bracket field updated");
+  };
+  const loadOfficialBracket = async () => {
+    if (!window.confirm("Load the official 2026 World Cup Round of 32 in the correct bracket order? This replaces the current field.")) return;
+    await writeBracket({ ...(bracket || {}), seeds: OFFICIAL_R32, locked: bracket?.locked || false });
+    setEditingSeeds(false);
+    flash("Official bracket loaded");
   };
 
   // Auto-fill results from the live web via the built-in AI + web search
@@ -2358,9 +2375,14 @@ export default function App() {
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                     {!bracket?.seeds?.length ? (
-                      <button className="wc-btn" onClick={() => setEditingSeeds((v) => !v)} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: C.grad, color: "#201700", boxShadow: GRAD_SHADOW }}>
-                        <Pencil size={14} /> {editingSeeds ? "Close editor" : "Create field manually"}
-                      </button>
+                      <>
+                        <button className="wc-btn" onClick={loadOfficialBracket} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: C.grad, color: "#201700", boxShadow: GRAD_SHADOW }}>
+                          <GitBranch size={14} /> Load official bracket
+                        </button>
+                        <button className="wc-btn" onClick={() => setEditingSeeds((v) => !v)} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: editingSeeds ? C.soft : "transparent", color: C.text }}>
+                          <Pencil size={14} /> {editingSeeds ? "Close editor" : "Create field manually"}
+                        </button>
+                      </>
                     ) : (
                       <>
                         <button className="wc-btn" onClick={toggleBracketLock} style={{
@@ -2369,6 +2391,9 @@ export default function App() {
                         }}>{bracket.locked ? <><Unlock size={15} /> Unlock bracket</> : <><Lock size={15} /> Lock bracket</>}</button>
                         <button className="wc-btn" onClick={() => setEditingSeeds((v) => !v)} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: editingSeeds ? C.soft : "transparent", color: C.text }}>
                           <Pencil size={14} /> {editingSeeds ? "Close editor" : "Edit field"}
+                        </button>
+                        <button className="wc-btn" onClick={loadOfficialBracket} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: "transparent", color: C.text }}>
+                          <GitBranch size={14} /> Load official
                         </button>
                         <button className="wc-btn" onClick={clearBracket} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, borderRadius: 11, padding: "10px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer", background: "transparent", color: C.mute }}>
                           <RotateCcw size={14} /> Clear field
