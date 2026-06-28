@@ -99,7 +99,8 @@ export default async function handler(req, res) {
       `In "standings" give the CURRENT table order (top to bottom by points, then goal difference, then goals scored) for EVERY group that has played at least one match — use the exact team names, and set "played" to how many of that group's 6 matches are completed. This is the most important field. In "matches" you only need finished matches from the most recent day or two (full-time, with final score) — do NOT list the entire tournament. ` +
       `In "today" list EVERY match whose kickoff date in US Pacific is EXACTLY ${ptYMD} — include matches that already finished earlier today (status "final" with score), matches in progress (status "live" with minute and score), and matches still to come today (status "upcoming"). Set each item's "date" to "${ptYMD}". Do NOT include any match whose Pacific date is not ${ptYMD} (no tomorrow, no yesterday). If no matches fall on ${ptYMD}, use an empty array. ` +
       `Use EXACTLY these team names and the correct group letter for each (group: teams) — ${teamsByGroup}. ` +
-      `For knockout arrays, include a team only once it has confirmed reached that round; otherwise []. Reply with only the JSON object.`;
+      `For knockout arrays, include a team only once it has confirmed reached that round; otherwise []. ` +
+      `CRITICAL: Read each group's standings table exactly as already published (FIFA/ESPN/Google sports) and transcribe the order — do NOT derive tables from individual scores, do NOT show any calculations, reasoning, or commentary. Your ENTIRE reply must be the single JSON object: start with { and end with }, nothing before or after.`;
 
     const ar = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -111,6 +112,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 8000,
+        system: "You are a precise sports-data extraction tool. You use web search to look up results, then reply with EXACTLY ONE minified JSON object and nothing else — no explanations, no analysis, no step-by-step working, no markdown fences, no commentary. Read published standings and results directly and transcribe them; never recompute tables yourself. Your entire final message must start with { and end with }.",
         messages: [{ role: "user", content: prompt }],
         tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 6 }],
       }),
