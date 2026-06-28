@@ -130,17 +130,16 @@ export default async function handler(req, res) {
 
     const ar2 = await callAnthropic({
       model: "claude-sonnet-4-6", max_tokens: 4000,
-      system: "You convert sports research into exactly one minified JSON object. Output ONLY the JSON — no prose, no markdown, no commentary.",
+      system: "You convert sports research into exactly one minified JSON object. Output ONLY the JSON object, starting with { and ending with } — no prose, no markdown, no commentary before or after.",
       messages: [
         { role: "user", content: extractPrompt },
-        { role: "assistant", content: "{" },
       ],
     });
     const data2 = await ar2.json();
     if (data2.error) {
       return res.status(200).json({ ok: false, error: data2.error.message || data2.error.type || "Anthropic API error" });
     }
-    const text = "{" + (data2.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+    const text = (data2.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
 
     // ?debug=1 — show what was gathered + the extracted JSON, without changing stored data
     const debugMode = (req.query && (req.query.debug === "1" || req.query.debug === "true")) || String(req.url || "").includes("debug=1");
