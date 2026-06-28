@@ -103,7 +103,7 @@ export default async function handler(req, res) {
     // ---- Call 1: gather the data via web search (verbose reasoning is fine; we don't parse this) ----
     const gatherPrompt =
       `You have a web search tool. The 2026 FIFA World Cup is underway. In US Pacific time, today is ${ptFull} (${ptYMD}). ` +
-      `Search the web (several times as needed) and find: (1) each group's CURRENT standings table top-to-bottom and how many of its 6 matches are completed; (2) every match scheduled TODAY (${ptYMD} US Pacific) with its kickoff time in US Pacific, status (upcoming/live/final) and score; (3) which teams have reached each knockout round; (4) the Round-of-32 matchups if the bracket is officially set. ` +
+      `Search the web (several times as needed) and find: (1) each group's CURRENT standings table top-to-bottom and how many of its 6 matches are completed; (2) every match scheduled TODAY (${ptYMD} US Pacific) with its kickoff time in US Pacific, status (upcoming/live/final) and score; (3) which teams have reached each knockout round; (4) the Round-of-32 matchups if the bracket is officially set — list them in OFFICIAL BRACKET ORDER from the published bracket diagram, top to bottom, so that the winners of the 1st and 2nd matchups meet next, the 3rd and 4th meet next, and so on (NOT grouped by letter). ` +
       `Use these groups and exact team names — ${teamsByGroup}. ` +
       `Report everything you find as plain text, stating each group's finishing order and played count explicitly.`;
 
@@ -125,7 +125,7 @@ export default async function handler(req, res) {
       `Use EXACTLY these team names and group letters — ${teamsByGroup}. ` +
       `"standings" must include every group that has played at least one match (order by points, then goal difference, then goals scored; played 0-6). ` +
       `"today" includes only matches whose US Pacific kickoff date is exactly ${ptYMD}, times in US Pacific, [] if none. ` +
-      `Knockout arrays: a team only once it has reached that round, else []. "r32": 16 pairs only if the bracket is officially set, else []. ` +
+      `Knockout arrays: a team only once it has reached that round, else []. "r32": the 16 matchups in OFFICIAL BRACKET ORDER (top to bottom of the published bracket diagram) so winners of pair 1 & pair 2 meet next, pair 3 & 4 meet next, etc. — only if the bracket is officially set, else []. ` +
       `Use empty arrays where data is missing.\n\nRESEARCH:\n${research}`;
 
     const ar2 = await callAnthropic({

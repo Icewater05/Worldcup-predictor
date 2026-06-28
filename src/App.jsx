@@ -530,14 +530,27 @@ function BracketSeedEditor({ seeds, onSave, onCancel }) {
   );
   return (
     <div style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".1em", color: C.mute, marginBottom: 8 }}>EDIT ROUND-OF-32 MATCHUPS</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: 360, overflowY: "auto", paddingRight: 2 }}>
-        {draft.map((pair, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span className="wc-mono" style={{ width: 22, fontSize: 11, color: C.mute, flexShrink: 0 }}>{i + 1}</span>
-            {sel(i, 0)}
-            <span style={{ fontSize: 11, color: C.mute, fontWeight: 700, flexShrink: 0 }}>vs</span>
-            {sel(i, 1)}
+      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".1em", color: C.mute, marginBottom: 4 }}>EDIT ROUND-OF-32 MATCHUPS</div>
+      <p style={{ fontSize: 11.5, color: C.mute, fontWeight: 600, margin: "0 0 10px", lineHeight: 1.5 }}>
+        Enter the 32 in the SAME order as the official bracket, reading top to bottom. The two matches under each "Round of 16" heading are the ones whose winners then play each other.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 430, overflowY: "auto", paddingRight: 2 }}>
+        {Array.from({ length: 8 }).map((_, g) => (
+          <div key={g} style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".1em", color: C.gold, padding: "2px 0 6px" }}>
+              ROUND OF 16 · MATCH {g + 1}
+            </div>
+            {[0, 1].map((j) => {
+              const i = g * 2 + j;
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                  <span className="wc-mono" style={{ width: 22, fontSize: 11, color: C.mute, flexShrink: 0 }}>{i + 1}</span>
+                  {sel(i, 0)}
+                  <span style={{ fontSize: 11, color: C.mute, fontWeight: 700, flexShrink: 0 }}>vs</span>
+                  {sel(i, 1)}
+                </div>
+              );
+            })}
           </div>
         ))}
       </div>
