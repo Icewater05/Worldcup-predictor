@@ -91,11 +91,12 @@ export default async function handler(req, res) {
       `Search the web for the latest results AND today's schedule — search several times if needed (e.g. "World Cup 2026 results today", "World Cup 2026 schedule today", specific group fixtures). ` +
       `Then reply with ONLY a single minified JSON object — no prose, no markdown, no backticks. ALWAYS return valid JSON even if nothing has finished yet (use empty arrays). Schema: ` +
       `{"matches":[{"group":"<A-L>","home":"<team>","away":"<team>","homeGoals":<int>,"awayGoals":<int>}],` +
+      `"standings":{"<A-L>":{"order":["1st place team","2nd","3rd","4th"],"played":<0-6 matches completed in this group>}},` +
       `"today":[{"date":"<YYYY-MM-DD US Pacific kickoff date>","group":"<A-L or empty>","home":"<team>","away":"<team>","status":"upcoming|live|final","time":"<kickoff in US Pacific like 10:00 AM>","minute":"<e.g. 63'>","homeGoals":<int>,"awayGoals":<int>}],` +
       `"knockout":{"r16":[teams that reached the Round of 16],"qf":[...],"sf":[...],"final":[...],"champion":[...]},` +
       `"r32":[[homeTeam,awayTeam] for each of the 16 Round-of-32 matchups, in bracket order, ONLY once the knockout bracket is officially set after the group stage; otherwise omit or use []],` +
       `"thirds":[up to 8 third-place teams that advanced]}. ` +
-      `In "matches" include ONLY matches that have FINISHED (full-time) with their final score; omit fixtures not yet kicked off or still in progress. ` +
+      `In "standings" give the CURRENT table order (top to bottom by points, then goal difference, then goals scored) for EVERY group that has played at least one match — use the exact team names, and set "played" to how many of that group's 6 matches are completed. This is the most important field. In "matches" you only need finished matches from the most recent day or two (full-time, with final score) — do NOT list the entire tournament. ` +
       `In "today" list EVERY match whose kickoff date in US Pacific is EXACTLY ${ptYMD} — include matches that already finished earlier today (status "final" with score), matches in progress (status "live" with minute and score), and matches still to come today (status "upcoming"). Set each item's "date" to "${ptYMD}". Do NOT include any match whose Pacific date is not ${ptYMD} (no tomorrow, no yesterday). If no matches fall on ${ptYMD}, use an empty array. ` +
       `Use EXACTLY these team names and the correct group letter for each (group: teams) — ${teamsByGroup}. ` +
       `For knockout arrays, include a team only once it has confirmed reached that round; otherwise []. Reply with only the JSON object.`;
@@ -109,7 +110,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
-        max_tokens: 3000,
+        max_tokens: 8000,
         messages: [{ role: "user", content: prompt }],
         tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 6 }],
       }),
@@ -157,6 +158,18 @@ export default async function handler(req, res) {
     const allMatches = Array.isArray(json.matches) ? json.matches : [];
     for (const k of GROUP_KEYS) {
       const teams = GROUPS[k];
+      // Primary: use the model's direct standings (compact + reliable, esp. at end of group stage)
+      const st = json.standings && json.standings[k];
+      if (st && Array.isArray(st.order)) {
+        const order = st.order.map(resolveTeam).filter(Boolean);
+        const played = Number(st.played);
+        if (order.length === 4 && new Set(order).size === 4 && Number.isFinite(played) && played > 0) {
+          nextResults[k] = { order, played: Math.min(6, played), total: 6, final: played >= 6 };
+          groupsSet++;
+          continue;
+        }
+      }
+      // Fallback: compute the table from finished match scores
       const seed = Object.fromEntries(teams.map((t, i) => [t, i]));
       const stat = Object.fromEntries(teams.map((t) => [t, { pts: 0, gd: 0, gf: 0, pl: 0 }]));
       let played = 0;
