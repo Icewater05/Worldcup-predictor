@@ -103,7 +103,8 @@ export default async function handler(req, res) {
     // ---- Call 1: gather the data via web search (verbose reasoning is fine; we don't parse this) ----
     const gatherPrompt =
       `You have a web search tool. The 2026 FIFA World Cup is underway. In US Pacific time, today is ${ptFull} (${ptYMD}). ` +
-      `Search the web (several times as needed) and find: (1) each group's CURRENT standings table top-to-bottom and how many of its 6 matches are completed; (2) every match scheduled TODAY (${ptYMD} US Pacific) with its kickoff time in US Pacific, status (upcoming/live/final) and score; (3) which teams have reached each knockout round; (4) the Round-of-32 matchups if the bracket is officially set — list them in OFFICIAL BRACKET ORDER from the published bracket diagram, top to bottom, so that the winners of the 1st and 2nd matchups meet next, the 3rd and 4th meet next, and so on (NOT grouped by letter). ` +
+      `Search the web (several times as needed) and focus on: (1) the KNOCKOUT results — which teams have WON and advanced in each round played so far (Round of 32, Round of 16, quarterfinals, semifinals, final, champion); (2) every match scheduled TODAY (${ptYMD} US Pacific) with its kickoff time in US Pacific, status (upcoming/live/final) and score; (3) the Round-of-32 matchups if the bracket is officially set — list them in OFFICIAL BRACKET ORDER from the published bracket diagram, top to bottom, so that the winners of the 1st and 2nd matchups meet next, the 3rd and 4th meet next, and so on (NOT grouped by letter). ` +
+      `Only if a GROUP STAGE group is still being played (not yet complete), also report its current standings order and matches completed; completed groups are already recorded, so you can skip them. ` +
       `Use these groups and exact team names — ${teamsByGroup}. ` +
       `Report everything you find as plain text, stating each group's finishing order and played count explicitly.`;
 
@@ -173,6 +174,8 @@ export default async function handler(req, res) {
     const allMatches = Array.isArray(json.matches) ? json.matches : [];
     for (const k of GROUP_KEYS) {
       const teams = GROUPS[k];
+      // Once a group is final, never touch it again — protects completed (and host-corrected) standings from a later imperfect search.
+      if (nextResults[k]?.final) continue;
       // Primary: use the model's direct standings (compact + reliable, esp. at end of group stage)
       const st = json.standings && json.standings[k];
       if (st && Array.isArray(st.order)) {

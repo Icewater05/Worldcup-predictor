@@ -1299,7 +1299,7 @@ export default function App() {
       setLastSync(Date.now());
       const groupsSet = j.groupsSet || 0, koRounds = j.koRounds || 0;
       setSyncMsg(groupsSet === 0 && koRounds === 0
-        ? "No completed matches found yet — nothing to update."
+        ? "Up to date — no new results since the last sync."
         : `Synced ${groupsSet}/12 groups${koRounds ? ` and ${koRounds} knockout round${koRounds > 1 ? "s" : ""}` : ""}. Scores updated.`);
     } catch (e) {
       setSyncMsg("Couldn't fetch live results just now. Try again, or enter results manually below.");
