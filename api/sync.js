@@ -86,58 +86,72 @@ export default async function handler(req, res) {
     const ptDate = new Date().toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric" });
     const ptFull = new Date().toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", weekday: "long", year: "numeric", month: "long", day: "numeric" });
     const ptYMD = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }); // YYYY-MM-DD in Pacific
-    const prompt =
-      `You have a web search tool. The 2026 FIFA World Cup is underway. In US Pacific time, today is ${ptFull} (${ptYMD}). ` +
-      `Search the web for the latest results AND today's schedule — search several times if needed (e.g. "World Cup 2026 results today", "World Cup 2026 schedule today", specific group fixtures). ` +
-      `Then reply with ONLY a single minified JSON object — no prose, no markdown, no backticks. ALWAYS return valid JSON even if nothing has finished yet (use empty arrays). Schema: ` +
+    const schema =
       `{"matches":[{"group":"<A-L>","home":"<team>","away":"<team>","homeGoals":<int>,"awayGoals":<int>}],` +
-      `"standings":{"<A-L>":{"order":["1st place team","2nd","3rd","4th"],"played":<0-6 matches completed in this group>}},` +
+      `"standings":{"<A-L>":{"order":["1st place team","2nd","3rd","4th"],"played":<0-6 matches completed>}},` +
       `"today":[{"date":"<YYYY-MM-DD US Pacific kickoff date>","group":"<A-L or empty>","home":"<team>","away":"<team>","status":"upcoming|live|final","time":"<kickoff in US Pacific like 10:00 AM>","minute":"<e.g. 63'>","homeGoals":<int>,"awayGoals":<int>}],` +
       `"knockout":{"r16":[teams that reached the Round of 16],"qf":[...],"sf":[...],"final":[...],"champion":[...]},` +
-      `"r32":[[homeTeam,awayTeam] for each of the 16 Round-of-32 matchups, in bracket order, ONLY once the knockout bracket is officially set after the group stage; otherwise omit or use []],` +
-      `"thirds":[up to 8 third-place teams that advanced]}. ` +
-      `In "standings" give the CURRENT table order (top to bottom by points, then goal difference, then goals scored) for EVERY group that has played at least one match — use the exact team names, and set "played" to how many of that group's 6 matches are completed. This is the most important field. In "matches" you only need finished matches from the most recent day or two (full-time, with final score) — do NOT list the entire tournament. ` +
-      `In "today" list EVERY match whose kickoff date in US Pacific is EXACTLY ${ptYMD} — include matches that already finished earlier today (status "final" with score), matches in progress (status "live" with minute and score), and matches still to come today (status "upcoming"). Set each item's "date" to "${ptYMD}". Do NOT include any match whose Pacific date is not ${ptYMD} (no tomorrow, no yesterday). If no matches fall on ${ptYMD}, use an empty array. ` +
-      `Use EXACTLY these team names and the correct group letter for each (group: teams) — ${teamsByGroup}. ` +
-      `For knockout arrays, include a team only once it has confirmed reached that round; otherwise []. ` +
-      `CRITICAL: Read each group's standings table exactly as already published (FIFA/ESPN/Google sports) and transcribe the order — do NOT derive tables from individual scores, do NOT show any calculations, reasoning, or commentary. Your ENTIRE reply must be the single JSON object: start with { and end with }, nothing before or after.`;
+      `"r32":[[homeTeam,awayTeam] for each of the 16 Round-of-32 matchups in bracket order, ONLY once the bracket is officially set after the group stage; otherwise []],` +
+      `"thirds":[up to 8 third-place teams that advanced]}`;
 
-    const ar = await fetch("https://api.anthropic.com/v1/messages", {
+    const callAnthropic = (body) => fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 8000,
-        system: "You are a precise sports-data extraction tool. You use web search to look up results, then reply with EXACTLY ONE minified JSON object and nothing else — no explanations, no analysis, no step-by-step working, no markdown fences, no commentary. Read published standings and results directly and transcribe them; never recompute tables yourself. Your entire final message must start with { and end with }.",
-        messages: [{ role: "user", content: prompt }],
-        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 6 }],
-      }),
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify(body),
+    });
+
+    // ---- Call 1: gather the data via web search (verbose reasoning is fine; we don't parse this) ----
+    const gatherPrompt =
+      `You have a web search tool. The 2026 FIFA World Cup is underway. In US Pacific time, today is ${ptFull} (${ptYMD}). ` +
+      `Search the web (several times as needed) and find: (1) each group's CURRENT standings table top-to-bottom and how many of its 6 matches are completed; (2) every match scheduled TODAY (${ptYMD} US Pacific) with its kickoff time in US Pacific, status (upcoming/live/final) and score; (3) which teams have reached each knockout round; (4) the Round-of-32 matchups if the bracket is officially set. ` +
+      `Use these groups and exact team names — ${teamsByGroup}. ` +
+      `Report everything you find as plain text, stating each group's finishing order and played count explicitly.`;
+
+    const ar = await callAnthropic({
+      model: "claude-sonnet-4-6", max_tokens: 8000,
+      messages: [{ role: "user", content: gatherPrompt }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 6 }],
     });
     const data = await ar.json();
-    const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
-
-    // surface a real API error (bad model, auth, credit, etc.) instead of a silent "no results"
     if (data.error) {
       return res.status(200).json({ ok: false, error: data.error.message || data.error.type || "Anthropic API error" });
     }
+    const research = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+    const searchBlocks = (data.content || []).filter((b) => b.type === "server_tool_use" || b.type === "web_search_tool_result").length;
 
-    // ?debug=1 — return what the model actually said (and whether it searched), without changing stored data
+    // ---- Call 2: convert the research into strict JSON (no tools, assistant prefill so it cannot narrate) ----
+    const extractPrompt =
+      `From the research below about the 2026 FIFA World Cup, output ONLY one minified JSON object matching this schema (no prose, no markdown): ${schema}. ` +
+      `Use EXACTLY these team names and group letters — ${teamsByGroup}. ` +
+      `"standings" must include every group that has played at least one match (order by points, then goal difference, then goals scored; played 0-6). ` +
+      `"today" includes only matches whose US Pacific kickoff date is exactly ${ptYMD}, times in US Pacific, [] if none. ` +
+      `Knockout arrays: a team only once it has reached that round, else []. "r32": 16 pairs only if the bracket is officially set, else []. ` +
+      `Use empty arrays where data is missing.\n\nRESEARCH:\n${research}`;
+
+    const ar2 = await callAnthropic({
+      model: "claude-sonnet-4-6", max_tokens: 4000,
+      system: "You convert sports research into exactly one minified JSON object. Output ONLY the JSON — no prose, no markdown, no commentary.",
+      messages: [
+        { role: "user", content: extractPrompt },
+        { role: "assistant", content: "{" },
+      ],
+    });
+    const data2 = await ar2.json();
+    if (data2.error) {
+      return res.status(200).json({ ok: false, error: data2.error.message || data2.error.type || "Anthropic API error" });
+    }
+    const text = "{" + (data2.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+
+    // ?debug=1 — show what was gathered + the extracted JSON, without changing stored data
     const debugMode = (req.query && (req.query.debug === "1" || req.query.debug === "true")) || String(req.url || "").includes("debug=1");
     if (debugMode) {
-      const searchBlocks = (data.content || []).filter((b) => b.type === "server_tool_use" || b.type === "web_search_tool_result").length;
       return res.status(200).json({
-        ok: true, debug: true, searchBlocks, stop_reason: data.stop_reason || null,
-        apiError: data.error || null, modelText: (text || "").slice(0, 4000),
+        ok: true, debug: true, searchBlocks, stop_reason: data2.stop_reason || null,
+        jsonText: (text || "").slice(0, 3000), research: (research || "").slice(0, 1500),
       });
     }
     const start = text.indexOf("{"), end = text.lastIndexOf("}");
-    // No JSON in the reply usually just means there's nothing to report yet
-    // (e.g. before/early in the tournament the model answers in prose). Treat
-    // that as a clean "nothing to update" rather than an error.
+    // No JSON usually just means there's nothing to report yet — treat as a clean "nothing to update".
     if (start < 0 || end < 0) {
       return res.status(200).json({ ok: true, groupsSet: 0, koRounds: 0, note: "no-results-yet", syncedAt: Date.now() });
     }
