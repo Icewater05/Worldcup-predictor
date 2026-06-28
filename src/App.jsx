@@ -2040,6 +2040,7 @@ export default function App() {
                 {viewStandings.map((p, i) => {
                   const medal = i === 0 ? C.gold : i === 1 ? "#9AA0A6" : i === 2 ? "#CD7F4A" : C.mute;
                   const me = identity && p.slug === identity.slug;
+                  const koDone = bracketActive && p.koBracket && Object.keys(p.koBracket).filter((k) => p.koBracket[k]).length >= BR_TOTAL;
                   return (
                     <div key={p.slug} style={{
                       display: "flex", alignItems: "center", gap: 12, padding: "10px 12px",
@@ -2047,15 +2048,21 @@ export default function App() {
                       background: me ? "rgba(232,184,75,.08)" : "transparent",
                     }}>
                       <span className="wc-mono" style={{ width: 20, textAlign: "center", fontWeight: 700, fontSize: 15, color: medal }}>{i + 1}</span>
-                      <span style={{ flex: 1, fontWeight: 700, fontSize: 15, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {p.name}{me ? " (you)" : ""}
-                        {p.koOnly && <span style={{ marginLeft: 7, fontSize: 9, fontWeight: 800, letterSpacing: ".06em", color: C.mute, border: `1px solid ${C.line}`, borderRadius: 6, padding: "1px 5px", verticalAlign: "middle" }}>KO ONLY</span>}
+                      <span style={{ flex: 1, fontWeight: 700, fontSize: 15, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}{me ? " (you)" : ""}</span>
+                        {koDone && <GitBranch size={13} color={C.gold} style={{ flexShrink: 0 }} aria-label="Bracket locked in" />}
+                        {p.koOnly && <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".06em", color: C.mute, border: `1px solid ${C.line}`, borderRadius: 6, padding: "1px 5px", flexShrink: 0 }}>KO ONLY</span>}
                       </span>
                       <span className="wc-mono" style={{ fontWeight: 700, fontSize: 15, color: i === 0 ? C.gold : C.text }}>{viewMetric(p)} pts</span>
                     </div>
                   );
                 })}
               </div>
+              {bracketActive && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: C.mute, fontWeight: 600, margin: "0 2px 12px" }}>
+                  <GitBranch size={12} color={C.gold} /> = knockout bracket locked in
+                </div>
+              )}
               {(projecting || bracketActive) && (() => {
                 const yi = viewStandings.findIndex((p) => identity && p.slug === identity.slug);
                 if (yi < 0) return null;
