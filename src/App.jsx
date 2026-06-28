@@ -528,6 +528,73 @@ function KnockoutConsensus({ data }) {
   );
 }
 
+function BracketTree({ seeds, picks, results }) {
+  if (!seeds || seeds.length !== 16) return null;
+  const reached = [results?.reachedR16, results?.reachedQF, results?.reachedSF, results?.reachedFinal].map((a) => new Set(a || []));
+  const champ = (picks && picks["4_0"]) || null;
+  const scored = (r, t) => t && (r < 4 ? reached[r].has(t) : results?.champion === t);
+  const comp = (r, m) => (r === 0 ? (seeds[m] || [null, null]) : [picks && picks[`${r - 1}_${2 * m}`], picks && picks[`${r - 1}_${2 * m + 1}`]]);
+  const hasResults = !!(results && (results.reachedR16?.length || results.champion));
+  const BOX_W = 150, MATCH_H = 50, UNIT = 62, COL_STEP = 180, TOTAL_H = 16 * UNIT;
+  const colX = (r) => r * COL_STEP;
+  const cy = (r, m) => (TOTAL_H / BR_COUNTS[r]) * (m + 0.5);
+  const totalW = colX(4) + BOX_W + 120;
+  const lines = [];
+  for (let r = 0; r < 4; r++) {
+    for (let m = 0; m < BR_COUNTS[r]; m++) {
+      const x1 = colX(r) + BOX_W, y1 = cy(r, m), x2 = colX(r + 1), y2 = cy(r + 1, Math.floor(m / 2));
+      const midX = x1 + (COL_STEP - BOX_W) / 2;
+      lines.push(`M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`);
+    }
+  }
+  lines.push(`M ${colX(4) + BOX_W} ${cy(4, 0)} H ${colX(4) + BOX_W + 50}`);
+  return (
+    <div style={{ overflow: "auto", WebkitOverflowScrolling: "touch", padding: "20px 14px 14px" }}>
+      <div style={{ position: "relative", width: totalW, height: TOTAL_H }}>
+        {BR_ROUNDS.map((lab, r) => (
+          <div key={lab} style={{ position: "absolute", left: colX(r), top: -14, width: BOX_W, fontSize: 9.5, fontWeight: 800, letterSpacing: ".08em", color: C.mute, textTransform: "uppercase" }}>{lab}</div>
+        ))}
+        <svg width={totalW} height={TOTAL_H} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
+          {lines.map((d, i) => <path key={i} d={d} fill="none" stroke={C.line} strokeWidth={1.5} />)}
+        </svg>
+        {BR_COUNTS.map((cnt, r) => (
+          Array.from({ length: cnt }).map((_, m) => {
+            const [a, b] = comp(r, m);
+            const pick = r < 4 ? (picks && picks[`${r}_${m}`]) : champ;
+            const teamRow = (t) => {
+              const isPick = t && t === pick;
+              const ok = isPick && hasResults && scored(r, t);
+              const miss = isPick && hasResults && !scored(r, t);
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 6px", borderRadius: 6, height: MATCH_H / 2 - 3,
+                  background: isPick ? (ok ? "rgba(62,158,94,.14)" : miss ? "rgba(217,84,74,.12)" : "rgba(200,144,28,.13)") : "transparent" }}>
+                  <span style={{ fontSize: 13 }}>{FLAG[t] || "·"}</span>
+                  <span style={{ flex: 1, fontSize: 11, fontWeight: isPick ? 800 : 600, color: t ? C.text : C.mute, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t || "TBD"}</span>
+                  {ok && <Check size={12} color={C.pos} />}{miss && <X size={12} color={C.coral} />}
+                </div>
+              );
+            };
+            return (
+              <div key={`${r}_${m}`} style={{ position: "absolute", left: colX(r), top: cy(r, m) - MATCH_H / 2, width: BOX_W, height: MATCH_H,
+                background: C.card, border: `1px solid ${C.line}`, borderRadius: 9, boxShadow: "0 2px 6px rgba(20,20,25,.05)", display: "flex", flexDirection: "column", justifyContent: "center", padding: "2px" }}>
+                {teamRow(a)}
+                {teamRow(b)}
+              </div>
+            );
+          })
+        ))}
+        <div style={{ position: "absolute", left: colX(4) + BOX_W + 50, top: cy(4, 0) - 26, width: 122, height: 52, background: C.grad, borderRadius: 11, boxShadow: GRAD_SHADOW, display: "flex", alignItems: "center", gap: 7, padding: "0 11px", color: "#201700" }}>
+          <Trophy size={17} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: ".08em", opacity: .7 }}>CHAMPION</div>
+            <div style={{ fontWeight: 800, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{champ ? `${FLAG[champ] || ""} ${champ}` : "—"}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BracketSeedEditor({ seeds, onSave, onCancel }) {
   const teamOpts = [...ALL_TEAMS].sort();
   const [draft, setDraft] = useState(seeds.map((p) => [p[0] || teamOpts[0], p[1] || teamOpts[1]]));
@@ -979,6 +1046,8 @@ export default function App() {
   const [koDraft, setKoDraft] = useState({ open: false, thirds: [], actual: emptyKo(), finals: {} });
   const [scope, setScope] = useState("global"); // leaderboard scope: "league" | "global"
   const [boardView, setBoardView] = useState("overall"); // standings metric: "overall" | "bracket"
+  const [boardTab, setBoardTab] = useState("scores"); // board section: "scores" | "groups"
+  const [viewBracketSlug, setViewBracketSlug] = useState(null); // which player's bracket to view
   const [boardMode, setBoardMode] = useState("projected"); // "projected" | "official"
   const [picksLocked, setPicksLocked] = useState(false); // host-controlled group-pick lock
   const [peopleMode, setPeopleMode] = useState("player"); // everyone's-picks browser: "player" | "group"
@@ -1984,6 +2053,18 @@ export default function App() {
         {/* ---------------- LEADERBOARD ---------------- */}
         {view === "board" && (
           <div className="wc-fade">
+            {bracketActive && (
+              <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: C.soft, border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 14 }}>
+                {[["scores", "Scores"], ["groups", "Group stage"]].map(([id, label]) => (
+                  <button key={id} className="wc-btn" onClick={() => setBoardTab(id)} style={{
+                    flex: 1, padding: "10px 8px", borderRadius: 12, border: "none", cursor: "pointer", fontWeight: 800, fontSize: 13,
+                    background: boardTab === id ? C.grad : "transparent", color: boardTab === id ? "#201700" : C.mute,
+                    boxShadow: boardTab === id ? GRAD_SHADOW : "none",
+                  }}>{label}</button>
+                ))}
+              </div>
+            )}
+            {(!bracketActive || boardTab === "scores") && (<>
             {hasMovers && (
               <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 14, marginBottom: 14, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
                 <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".14em", color: C.mute, marginBottom: 10 }}>TODAY'S MOVERS</div>
@@ -2041,11 +2122,13 @@ export default function App() {
                   const medal = i === 0 ? C.gold : i === 1 ? "#9AA0A6" : i === 2 ? "#CD7F4A" : C.mute;
                   const me = identity && p.slug === identity.slug;
                   const koDone = bracketActive && p.koBracket && Object.keys(p.koBracket).filter((k) => p.koBracket[k]).length >= BR_TOTAL;
+                  const canView = bracketActive && p.koBracket && Object.keys(p.koBracket).some((k) => p.koBracket[k]);
                   return (
-                    <div key={p.slug} style={{
+                    <div key={p.slug} onClick={() => canView && setViewBracketSlug(p.slug)} style={{
                       display: "flex", alignItems: "center", gap: 12, padding: "10px 12px",
                       borderTop: i ? `1px solid ${C.line}` : "none",
                       background: me ? "rgba(232,184,75,.08)" : "transparent",
+                      cursor: canView ? "pointer" : "default",
                     }}>
                       <span className="wc-mono" style={{ width: 20, textAlign: "center", fontWeight: 700, fontSize: 15, color: medal }}>{i + 1}</span>
                       <span style={{ flex: 1, fontWeight: 700, fontSize: 15, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
@@ -2054,13 +2137,14 @@ export default function App() {
                         {p.koOnly && <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".06em", color: C.mute, border: `1px solid ${C.line}`, borderRadius: 6, padding: "1px 5px", flexShrink: 0 }}>KO ONLY</span>}
                       </span>
                       <span className="wc-mono" style={{ fontWeight: 700, fontSize: 15, color: i === 0 ? C.gold : C.text }}>{viewMetric(p)} pts</span>
+                      {canView && <ChevronRight size={15} color={C.mute} style={{ flexShrink: 0, marginLeft: -4 }} />}
                     </div>
                   );
                 })}
               </div>
               {bracketActive && (
-                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: C.mute, fontWeight: 600, margin: "0 2px 12px" }}>
-                  <GitBranch size={12} color={C.gold} /> = knockout bracket locked in
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: C.mute, fontWeight: 600, margin: "0 2px 12px", flexWrap: "wrap" }}>
+                  <GitBranch size={12} color={C.gold} /> = bracket locked in · tap a name to view their bracket
                 </div>
               )}
               {(projecting || bracketActive) && (() => {
@@ -2091,6 +2175,7 @@ export default function App() {
             {bracketActive && bracket?.locked && <KnockoutConsensus data={koConsensus} />}
 
             <TrackerCard teamsLeft={teamsLeft} matchesLeft={matchesLeft} matchesPlayed={matchesPlayed} stageLabel={stageLabel} survivors={survivors} />
+            </>)}
 
             {inLeague ? (
               <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: C.soft, border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 14 }}>
@@ -2192,6 +2277,7 @@ export default function App() {
               </div>
             )}
 
+            {(!bracketActive || boardTab === "groups") && (<>
             {scopedPreds.length > 0 && liveGroups.length === 0 && (
               <>
                 <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
@@ -2308,6 +2394,7 @@ export default function App() {
                 )}
               </div>
             )}
+            </>)}
           </div>
         )}
 
@@ -2656,6 +2743,31 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Bracket viewer */}
+      {viewBracketSlug && (() => {
+        const pv = standings.find((p) => p.slug === viewBracketSlug) || allPreds.find((p) => p.slug === viewBracketSlug);
+        if (!pv) return null;
+        return (
+          <div onClick={() => setViewBracketSlug(null)} style={{ position: "fixed", inset: 0, background: C.scrim, zIndex: 90, display: "flex", padding: "14px 0" }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: C.bg, margin: "auto", width: "96%", maxWidth: 720, height: "90vh", borderRadius: 18, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(20,20,25,.3)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${C.line}` }}>
+                <GitBranch size={18} color={C.gold} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pv.name}{identity && pv.slug === identity.slug ? " (you)" : ""}'s bracket</div>
+                  {(bracket?.results?.reachedR16?.length || bracket?.results?.champion) ? <div style={{ fontSize: 11.5, color: C.mute, fontWeight: 700 }}>{pv.brPts || 0} bracket pts so far</div> : null}
+                </div>
+                <button className="wc-btn" onClick={() => setViewBracketSlug(null)} style={{ border: `1px solid ${C.line}`, background: "transparent", borderRadius: 10, padding: "8px 11px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 800, fontSize: 13, color: C.text, flexShrink: 0 }}>
+                  <X size={15} /> Close
+                </button>
+              </div>
+              <div style={{ flex: 1, overflow: "auto" }}>
+                <BracketTree seeds={bracket?.seeds} picks={pv.koBracket} results={bracket?.results} />
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Toast */}
       {toast && (
