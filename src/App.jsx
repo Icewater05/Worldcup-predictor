@@ -755,8 +755,8 @@ function PhaseToggle({ phase, setPhase, koLocked }) {
   };
   return (
     <div className="wc-glass" style={{ display: "flex", gap: 5, padding: 5, background: C.soft, border: `1px solid ${C.line}`, borderRadius: 16, marginBottom: 16 }}>
-      <Btn id="group" label="Group Stage" />
       <Btn id="knockout" label="Knockout" />
+      <Btn id="group" label="Group Stage" />
     </div>
   );
 }
@@ -834,8 +834,24 @@ function KnockoutBoard({ pool, ko, onToggle, editable, showFinals, finals, onTog
   );
 }
 
-function TrackerCard({ teamsLeft, matchesLeft, matchesPlayed, stageLabel, survivors, compact }) {
+function TrackerCard({ teamsLeft, matchesLeft, matchesPlayed, stageLabel, survivors, advanced, advancedLabel, compact }) {
   const pct = Math.round((matchesPlayed / 104) * 100);
+  const chips = (list, gold) => (
+    list.length <= 16 ? (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+        {list.map((t) => (
+          <span key={t} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: C.panel2, border: `1px solid ${gold ? C.gold : C.line}`, borderRadius: 999, padding: "5px 11px", fontSize: 12.5, fontWeight: 700 }}>
+            <span style={{ fontSize: 15 }}>{FLAG[t] || "🏳️"}</span>{t}
+          </span>
+        ))}
+      </div>
+    ) : (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, fontSize: 22, lineHeight: 1.1 }}>
+        {list.map((t) => <span key={t} title={t}>{FLAG[t] || "🏳️"}</span>)}
+      </div>
+    )
+  );
+  const showAdvanced = !compact && advanced && advanced.length > 0 && survivors && advanced.length < survivors.length && teamsLeft !== 1;
   return (
     <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 16, marginBottom: 16, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
@@ -862,24 +878,20 @@ function TrackerCard({ teamsLeft, matchesLeft, matchesPlayed, stageLabel, surviv
           {matchesPlayed} of 104 matches played · {pct}% complete
         </div>
       </div>
+      {showAdvanced && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".12em", color: C.gold, marginBottom: 8 }}>
+            {(advancedLabel || "Advanced").toUpperCase()}
+          </div>
+          {chips(advanced, true)}
+        </div>
+      )}
       {!compact && survivors && survivors.length > 0 && (
         <div style={{ marginTop: 14 }}>
           <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".12em", color: C.mute, marginBottom: 8 }}>
             {teamsLeft === 1 ? "CHAMPION" : "STILL ALIVE"}
           </div>
-          {survivors.length <= 16 ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-              {survivors.map((t) => (
-                <span key={t} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: C.panel2, border: `1px solid ${teamsLeft === 1 ? C.gold : C.line}`, borderRadius: 999, padding: "5px 11px", fontSize: 12.5, fontWeight: 700 }}>
-                  <span style={{ fontSize: 15 }}>{FLAG[t] || "🏳️"}</span>{t}
-                </span>
-              ))}
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, fontSize: 22, lineHeight: 1.1 }}>
-              {survivors.map((t) => <span key={t} title={t}>{FLAG[t] || "🏳️"}</span>)}
-            </div>
-          )}
+          {chips(survivors, teamsLeft === 1)}
         </div>
       )}
     </div>
@@ -1040,7 +1052,8 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [showScoring, setShowScoring] = useState(false);
   const isAdmin = !!session?.user?.email && ADMIN_EMAILS.includes(session.user.email.toLowerCase());
-  const [phase, setPhase] = useState("group"); // "group" | "knockout"
+  const [phase, setPhase] = useState("group"); // predict-flow phase (kept for save messaging)
+  const [resultsPhase, setResultsPhase] = useState("knockout"); // Results page sub-tab: "knockout" | "group"
   const [koPicks, setKoPicks] = useState(emptyKo); // this user's knockout picks
   const [knockout, setKnockout] = useState(null);  // shared: { open, thirds, actual, finals }
   const [koDraft, setKoDraft] = useState({ open: false, thirds: [], actual: emptyKo(), finals: {} });
@@ -1650,12 +1663,40 @@ export default function App() {
     : nSF < 4 ? "Quarter-finals"
     : nFin < 2 ? "Semi-finals"
     : "The Final";
-  const survivors = nChamp > 0 ? (ka.champion || [])
-    : nFin > 0 ? (ka.final || [])
-    : nSF > 0 ? (ka.sf || [])
-    : nQF > 0 ? (ka.qf || [])
-    : nR16 > 0 ? (ka.r16 || [])
+  // --- derive eliminated teams (each completed KO match eliminates the loser) to show the full alive set ---
+  const koSeeds = (bracket?.seeds && bracket.seeds.length === 16) ? bracket.seeds : null;
+  const eliminated = new Set();
+  if (koSeeds) {
+    const pairUp = (arr) => { const out = []; for (let i = 0; i < arr.length; i += 2) out.push([arr[i], arr[i + 1]]); return out; };
+    const winnersOf = (pairs, winSet) => pairs.map(([a, b]) => {
+      if (!a || !b) return a || b || null;
+      const aw = winSet.has(a), bw = winSet.has(b);
+      if (aw && !bw) { eliminated.add(b); return a; }
+      if (bw && !aw) { eliminated.add(a); return b; }
+      return null; // match not decided yet
+    });
+    const w32 = winnersOf(koSeeds, new Set(ka.r16 || []));
+    const w16 = winnersOf(pairUp(w32), new Set(ka.qf || []));
+    const w8 = winnersOf(pairUp(w16), new Set(ka.sf || []));
+    const w4 = winnersOf(pairUp(w8), new Set(ka.final || []));
+    const champT = (ka.champion || [])[0];
+    if (champT && w4.filter(Boolean).length === 2) { const ru = w4.find((t) => t && t !== champT); if (ru) eliminated.add(ru); }
+  }
+  // every team still in it (winners + teams whose match hasn't happened yet)
+  const survivors = (allGroupsFinal && koSeeds) ? koSeeds.flat().filter((t) => t && !eliminated.has(t))
     : (allGroupsFinal && koPool.length === 32 ? koPool : null);
+  // teams that have locked a spot in the next (still-incomplete) round
+  const advanced = !allGroupsFinal ? null
+    : nChamp > 0 ? (ka.champion || [])
+    : nR16 < 16 ? (ka.r16 || [])
+    : nQF < 8 ? (ka.qf || [])
+    : nSF < 4 ? (ka.sf || [])
+    : (ka.final || []);
+  const advancedLabel = nChamp > 0 ? "Champion"
+    : nR16 < 16 ? "Through to Round of 16"
+    : nQF < 8 ? "Through to Quarter-finals"
+    : nSF < 4 ? "Through to Semi-finals"
+    : "Through to the Final";
 
   // current user's live group breakdown (projection)
   const myGroupsForProj = (identity && allPreds.find((p) => p.slug === identity.slug)?.groups) || picks;
@@ -2188,7 +2229,7 @@ export default function App() {
 
             {bracketActive && bracket?.locked && <KnockoutConsensus data={koConsensus} />}
 
-            <TrackerCard teamsLeft={teamsLeft} matchesLeft={matchesLeft} matchesPlayed={matchesPlayed} stageLabel={stageLabel} survivors={survivors} />
+            <TrackerCard teamsLeft={teamsLeft} matchesLeft={matchesLeft} matchesPlayed={matchesPlayed} stageLabel={stageLabel} survivors={survivors} advanced={advanced} advancedLabel={advancedLabel} />
             </>)}
 
             {inLeague ? (
@@ -2517,9 +2558,9 @@ export default function App() {
                   </p>
                 </div>
 
-                <PhaseToggle phase={phase} setPhase={setPhase} koLocked={false} />
+                <PhaseToggle phase={resultsPhase} setPhase={setResultsPhase} koLocked={false} />
 
-                {phase === "group" && (
+                {resultsPhase === "group" && (
                   <>
                     <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-start" }}>
                       <Info size={16} color={C.gold} style={{ flexShrink: 0, marginTop: 2 }} />
@@ -2567,7 +2608,7 @@ export default function App() {
                   </>
                 )}
 
-                {phase === "knockout" && (
+                {resultsPhase === "knockout" && (
                   <>
                     {!allGroupsFinal ? (
                       <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 20, textAlign: "center", color: C.mute }}>
