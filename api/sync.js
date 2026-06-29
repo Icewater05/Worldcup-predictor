@@ -217,9 +217,14 @@ export default async function handler(req, res) {
     if (allFinal) nextKo.open = true;
     let koRounds = 0;
     for (const r of KO_ROUNDS) {
-      const arr = (json.knockout?.[r.key] || []).map(resolveTeam).filter(Boolean);
-      if (arr.length === r.count && new Set(arr).size === r.count) {
-        nextKo.actual[r.key] = arr; nextKo.finals[r.key] = true; koRounds++;
+      const fetched = (json.knockout?.[r.key] || []).map(resolveTeam).filter(Boolean);
+      // union with what's already recorded so advancing teams accumulate and a flaky sync can't un-score anyone
+      const merged = [...new Set([...(nextKo.actual[r.key] || []), ...fetched])].slice(0, r.count);
+      if (merged.length > 0) {
+        nextKo.actual[r.key] = merged;
+        const complete = merged.length === r.count;
+        nextKo.finals[r.key] = complete; // round fully done?
+        if (complete) koRounds++;
       }
     }
     nextKo.actual = normalizeKo(nextKo.actual);
