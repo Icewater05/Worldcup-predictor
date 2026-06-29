@@ -436,6 +436,36 @@ function brSanitize(p) {
 }
 const brCompetitors = (seeds, p, r, m) => (r === 0 ? (seeds[m] || [null, null]) : [p[`${r - 1}_${2 * m}`], p[`${r - 1}_${2 * m + 1}`]]);
 
+// did this player submit a bracket? (crowned a champion ⇒ filled it out)
+function hasBracket(p) {
+  return !!(p && p.koBracket && p.koBracket["4_0"]);
+}
+
+// max bracket points a player can STILL earn from picks whose team is alive and hasn't scored yet
+function bracketMaxRemaining(koBracket, results, eliminatedSet) {
+  if (!koBracket) return 0;
+  const PTS = [3, 5, 9, 16];
+  const elim = eliminatedSet || new Set();
+  const reached = [results?.reachedR16, results?.reachedQF, results?.reachedSF, results?.reachedFinal].map((a) => new Set(a || []));
+  let rem = 0;
+  for (let r = 0; r < 4; r++) {
+    for (let m = 0; m < BR_COUNTS[r]; m++) {
+      const t = koBracket[`${r}_${m}`];
+      if (!t || reached[r].has(t) || elim.has(t)) continue; // already scored, or dead
+      rem += PTS[r]; // still possible
+    }
+  }
+  const champPick = koBracket["4_0"];
+  if (champPick && results?.champion !== champPick && !elim.has(champPick)) rem += 30;
+  const f1 = koBracket["3_0"], f2 = koBracket["3_1"];
+  if (f1 && f2) {
+    const finalSet = new Set(results?.reachedFinal || []);
+    const bothIn = finalSet.has(f1) && finalSet.has(f2);
+    if (!bothIn && !elim.has(f1) && !elim.has(f2)) rem += 18;
+  }
+  return rem;
+}
+
 // slot-based bracket scoring: a pick scores if that team actually reached that round
 function scoreBracket(koBracket, results) {
   if (!koBracket || !results) return 0;
@@ -1587,10 +1617,10 @@ export default function App() {
     if (!storageReady || !moversLoaded || standings.length === 0) return;
     const anyScored = standings.some((p) => (p.totalProjected || 0) > 0);
     if (!anyScored) return; // never set a baseline before there's any scoring (avoids a meaningless all-zero start)
-    if (moversSnap?.baselineDay === todayStr && moversSnap?.v === 3) return; // today's baseline already saved
+    if (moversSnap?.baselineDay === todayStr && moversSnap?.v === 4) return; // today's baseline already saved
     const baseline = {};
-    standings.forEach((p) => { baseline[p.slug] = p.totalProjected; });
-    const snap = { v: 3, baselineDay: todayStr, baseline };
+    standings.forEach((p) => { baseline[p.slug] = (p.combined != null ? p.combined : p.totalProjected); });
+    const snap = { v: 4, baselineDay: todayStr, baseline };
     setMoversSnap(snap);
     store.set(MOVERS_KEY, JSON.stringify(snap));
   }, [storageReady, moversLoaded, standings, moversSnap, todayStr]);
@@ -1616,11 +1646,11 @@ export default function App() {
   const bv = bracketActive ? boardView : "overall";
   const viewMetric = (p) => (bv === "bracket" ? (p.brPts || 0) : (p.combined != null ? p.combined : p.total));
   const viewStandings = bracketActive
-    ? [...scopedStandings].sort((a, b) => viewMetric(b) - viewMetric(a) || (a.submittedAt || 0) - (b.submittedAt || 0))
+    ? [...scopedStandings].filter((p) => bv !== "bracket" || hasBracket(p)).sort((a, b) => viewMetric(b) - viewMetric(a) || (a.submittedAt || 0) - (b.submittedAt || 0))
     : scopedStandings;
 
-  // movers = rank change WITHIN the current view (global or league) vs today's baseline totals
-  const moversBase = moversSnap?.v === 3 ? moversSnap.baseline : null;
+  // movers = rank + point change WITHIN the current view vs today's baseline (combined points)
+  const moversBase = moversSnap?.v === 4 ? moversSnap.baseline : null;
   let moversList = [];
   if (moversBase) {
     const eligible = scopedStandings.filter((p) => moversBase[p.slug] != null); // already in current order
@@ -1628,10 +1658,11 @@ export default function App() {
     const baseRank = {};
     [...eligible].sort((a, b) => (moversBase[b.slug] - moversBase[a.slug]) || ((a.submittedAt || 0) - (b.submittedAt || 0)))
       .forEach((p, i) => { baseRank[p.slug] = i + 1; });
-    moversList = eligible.map((p) => ({ slug: p.slug, name: p.name, delta: baseRank[p.slug] - curRank[p.slug] }))
-      .filter((m) => m.delta !== 0);
+    const curVal = (p) => (p.combined != null ? p.combined : p.totalProjected);
+    moversList = eligible.map((p) => ({ slug: p.slug, name: p.name, delta: baseRank[p.slug] - curRank[p.slug], pts: Math.max(0, Math.round(curVal(p) - moversBase[p.slug])) }))
+      .filter((m) => m.delta !== 0 || m.pts !== 0);
   }
-  const climbers = moversList.filter((m) => m.delta > 0).sort((a, b) => b.delta - a.delta).slice(0, 3);
+  const climbers = moversList.filter((m) => m.delta > 0 || m.pts > 0).sort((a, b) => (b.pts - a.pts) || (b.delta - a.delta)).slice(0, 3);
   const fallers = moversList.filter((m) => m.delta < 0).sort((a, b) => a.delta - b.delta).slice(0, 3);
   const hasMovers = climbers.length > 0 || fallers.length > 0;
 
@@ -1697,6 +1728,23 @@ export default function App() {
     : nQF < 8 ? "Through to Quarter-finals"
     : nSF < 4 ? "Through to Semi-finals"
     : "Through to the Final";
+
+  // ----- title race: each player's floor (current) and ceiling (max still possible) -----
+  const raceBase = scopedStandings.map((p) => {
+    const remaining = bracketActive ? bracketMaxRemaining(p.koBracket, koResults, eliminated) : 0;
+    return { slug: p.slug, name: p.name, floor: p.combined != null ? p.combined : (p.total || 0), ceiling: (p.combined != null ? p.combined : (p.total || 0)) + remaining, remaining, koOnly: p.koOnly, hasBr: hasBracket(p) };
+  });
+  const raceData = raceBase.map((p) => {
+    const others = raceBase.filter((q) => q.slug !== p.slug);
+    const othersMaxFloor = others.length ? Math.max(...others.map((q) => q.floor)) : 0;
+    const othersMaxCeil = others.length ? Math.max(...others.map((q) => q.ceiling)) : 0;
+    return { ...p, canWin: p.ceiling >= othersMaxFloor, clinched: others.length > 0 && p.floor >= othersMaxCeil };
+  }).sort((a, b) => b.ceiling - a.ceiling || b.floor - a.floor);
+  const raceMaxCeil = raceData.length ? Math.max(...raceData.map((p) => p.ceiling), 1) : 1;
+  const raceContenders = raceData.filter((p) => p.canWin);
+  const raceOut = raceData.filter((p) => !p.canWin);
+  const raceLeaderName = raceData[0]?.name;
+  const showRace = !!(bracketActive && bracket?.locked && raceData.length >= 2 && (koResults?.reachedR16?.length || koResults?.champion));
 
   // current user's live group breakdown (projection)
   const myGroupsForProj = (identity && allPreds.find((p) => p.slug === identity.slug)?.groups) || picks;
@@ -2128,18 +2176,19 @@ export default function App() {
                     <div key={m.slug} style={{ display: "flex", alignItems: "center", gap: 9 }}>
                       <TrendingUp size={15} color={C.pos} />
                       <span style={{ flex: 1, fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
-                      <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.pos }}>▲ {m.delta}</span>
+                      {m.pts > 0 && <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.pos }}>+{m.pts} pts</span>}
+                      {m.delta > 0 && <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.pos, opacity: .75 }}>▲{m.delta}</span>}
                     </div>
                   ))}
                   {fallers.map((m) => (
                     <div key={m.slug} style={{ display: "flex", alignItems: "center", gap: 9 }}>
                       <TrendingDown size={15} color={C.coral} />
                       <span style={{ flex: 1, fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
-                      <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.coral }}>▼ {Math.abs(m.delta)}</span>
+                      <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.coral }}>▼{Math.abs(m.delta)}</span>
                     </div>
                   ))}
                 </div>
-                <div style={{ fontSize: 10.5, color: C.mute, marginTop: 9, opacity: .8 }}>Rank change since the start of the day (projected).</div>
+                <div style={{ fontSize: 10.5, color: C.mute, marginTop: 9, opacity: .8 }}>{bracketActive ? "Points gained & rank change since the start of the day." : "Rank change since the start of the day (projected)."}</div>
               </div>
             )}
             {scopedPreds.length > 0 && (
@@ -2225,6 +2274,42 @@ export default function App() {
                 );
               })()}
               </>
+            )}
+
+            {showRace && (
+              <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 16, marginBottom: 16, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <Swords size={15} color={C.gold} />
+                  <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".16em", color: C.mute }}>TITLE RACE</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: C.mute, fontWeight: 600, marginBottom: 12 }}>Current points and the most each player can still reach.</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+                  {raceContenders.map((p) => {
+                    const me = identity && p.slug === identity.slug;
+                    const floorPct = Math.round((p.floor / raceMaxCeil) * 100);
+                    const ceilPct = Math.round((p.ceiling / raceMaxCeil) * 100);
+                    return (
+                      <div key={p.slug}>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 4 }}>
+                          <span style={{ fontWeight: 800, fontSize: 13.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{p.name}{me ? " (you)" : ""}</span>
+                          {p.clinched && <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".06em", color: "#201700", background: C.grad, borderRadius: 6, padding: "2px 6px" }}>CLINCHED 🏆</span>}
+                          <span className="wc-mono" style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{p.floor}</span>
+                          {p.remaining > 0 && <span className="wc-mono" style={{ fontSize: 12, fontWeight: 700, color: C.mute }}>→ {p.ceiling}</span>}
+                        </div>
+                        <div style={{ position: "relative", height: 8, borderRadius: 999, background: C.panel2, overflow: "hidden", border: `1px solid ${C.line}` }}>
+                          <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${ceilPct}%`, background: "rgba(200,144,28,.22)" }} />
+                          <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${floorPct}%`, background: C.grad }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {raceOut.length > 0 && (
+                  <div style={{ fontSize: 11, color: C.mute, fontWeight: 600, marginTop: 12, lineHeight: 1.5 }}>
+                    <span style={{ fontWeight: 800 }}>Out of the running:</span> {raceOut.map((p) => p.name).join(", ")} — can't catch {raceLeaderName} even at best.
+                  </div>
+                )}
+              </div>
             )}
 
             {bracketActive && bracket?.locked && <KnockoutConsensus data={koConsensus} />}
