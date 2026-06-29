@@ -228,6 +228,8 @@ export default async function handler(req, res) {
       }
     }
     nextKo.actual = normalizeKo(nextKo.actual);
+    const countKo = (a) => (a?.r16?.length || 0) + (a?.qf?.length || 0) + (a?.sf?.length || 0) + (a?.final?.length || 0) + (a?.champion?.length || 0);
+    const koNew = Math.max(0, countKo(nextKo.actual) - countKo(prevKo.actual)); // teams that advanced since last sync
 
     // ---- knockout bracket (Stage 3): seed the 32 + derive results for slot-based scoring ----
     const prevBracketRaw = await kvGet(SUPA_URL, "wc26:bracket", supaHeaders);
@@ -285,7 +287,7 @@ export default async function handler(req, res) {
     await kvSet(SUPA_URL, "wc26:bracket", JSON.stringify(nextBracket), supaHeaders);
     await kvSet(SUPA_URL, "wc26:today", JSON.stringify(todayPayload), supaHeaders);
 
-    return res.status(200).json({ ok: true, groupsSet, koRounds, seeded: seeds.length, todayCount: todayMatches.length, syncedAt: Date.now() });
+    return res.status(200).json({ ok: true, groupsSet, koRounds, koNew, seeded: seeds.length, todayCount: todayMatches.length, syncedAt: Date.now() });
   } catch (e) {
     return res.status(200).json({ ok: false, error: String((e && e.message) || e) });
   }

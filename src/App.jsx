@@ -1366,10 +1366,11 @@ export default function App() {
       if (!j || j.ok === false) throw new Error((j && j.error) || "sync-failed");
       await loadAll();
       setLastSync(Date.now());
-      const groupsSet = j.groupsSet || 0, koRounds = j.koRounds || 0;
-      setSyncMsg(groupsSet === 0 && koRounds === 0
-        ? "Up to date — no new results since the last sync."
-        : `Synced ${groupsSet}/12 groups${koRounds ? ` and ${koRounds} knockout round${koRounds > 1 ? "s" : ""}` : ""}. Scores updated.`);
+      const groupsSet = j.groupsSet || 0, koNew = j.koNew || 0;
+      const bits = [];
+      if (groupsSet) bits.push(`${groupsSet}/12 groups`);
+      if (koNew) bits.push(`${koNew} knockout result${koNew > 1 ? "s" : ""}`);
+      setSyncMsg(bits.length ? `Synced ${bits.join(" and ")}. Scores updated.` : "Up to date — no new results since the last sync.");
     } catch (e) {
       setSyncMsg("Couldn't fetch live results just now. Try again, or enter results manually below.");
     } finally {
@@ -1541,6 +1542,11 @@ export default function App() {
   const koActual = knockout?.actual;
   const koFinals = knockout?.finals || {};
   const koScoredRounds = KO_ROUNDS.filter((r) => koFinals?.[r.key]);
+  // Unified knockout results: from the same store the host edits (knockout.actual) AND the sync writes —
+  // so manual corrections on the Results page drive bracket points too. Falls back to sync's bracket.results.
+  const koResults = (koActual && (koActual.r16?.length || (koActual.champion || []).length))
+    ? { reachedR16: koActual.r16 || [], reachedQF: koActual.qf || [], reachedSF: koActual.sf || [], reachedFinal: koActual.final || [], champion: (koActual.champion || [])[0] || null }
+    : (bracket?.results || null);
   const standings = allPreds.map((p) => {
     let groupPtsOfficial = 0, groupPtsProjected = 0; const per = {}, perProj = {};
     for (const k of liveGroups) {
@@ -1548,10 +1554,10 @@ export default function App() {
       perProj[k] = s.points; groupPtsProjected += s.points;
       if (results[k].final) { per[k] = s.points; groupPtsOfficial += s.points; }
     }
-    const ks = scoreKnockout(p.ko, koActual, koFinals);
-    const totalOfficial = groupPtsOfficial + ks.points;
-    const totalProjected = groupPtsProjected + ks.points;
-    const brPts = scoreBracket(p.koBracket, bracket?.results);
+    const ks = scoreKnockout(p.ko, koActual, koFinals); // legacy per-round picks (unused in bracket era; kept for safety, always 0)
+    const totalOfficial = groupPtsOfficial; // knockout is scored solely via the bracket (brPts) now
+    const totalProjected = groupPtsProjected;
+    const brPts = scoreBracket(p.koBracket, koResults);
     const activeTotal = projecting ? totalProjected : totalOfficial;
     return {
       ...p, koPts: ks.points, koPer: ks.per, per, perProj,
@@ -1622,25 +1628,33 @@ export default function App() {
   const allGroupsFinal = finalGroups.length === 12;
   const thirdTeams = allGroupsFinal ? GROUP_KEYS.map((k) => results[k].order[2]) : [];
 
-  // ----- tournament tracker: remaining teams & matches -----
-  const kf = koFinals;
-  const teamsLeft = kf.champion ? 1 : kf.final ? 2 : kf.sf ? 4 : kf.qf ? 8 : kf.r16 ? 16 : allGroupsFinal ? 32 : 48;
+  // ----- tournament tracker: remaining teams & matches (per-match, not per-round) -----
+  const ka = koActual || {};
+  const nR16 = (ka.r16 || []).length, nQF = (ka.qf || []).length, nSF = (ka.sf || []).length, nFin = (ka.final || []).length, nChamp = (ka.champion || []).length;
+  const koMatchesDone = nR16 + nQF + nSF + nFin + nChamp; // each KO match yields one advancing team (= one elimination)
+  const teamsLeft = !allGroupsFinal ? 48 : Math.max(1, 32 - koMatchesDone);
   const groupMatchesPlayed = results ? GROUP_KEYS.reduce((n, k) => {
     const r = results[k];
     if (!r) return n;
     return n + (r.final ? 6 : Math.min(6, r.played || 0));
   }, 0) : 0;
   const matchesPlayed =
-    groupMatchesPlayed +                            // actual group matches played so far
-    (kf.r16 ? 16 : 0) + (kf.qf ? 8 : 0) + (kf.sf ? 4 : 0) +
-    (kf.final ? 2 : 0) + (kf.champion ? 2 : 0);     // champion done ⇒ final + 3rd-place played
+    groupMatchesPlayed +                                   // group matches played so far
+    nR16 + nQF + nSF + nFin + (nChamp > 0 ? 2 : 0);        // each KO match played; champion ⇒ final + 3rd-place
   const matchesLeft = 104 - matchesPlayed;
-  const stageLabel = kf.champion ? "Champion crowned 🏆" : kf.final ? "The Final" : kf.sf ? "Semi-finals"
-    : kf.qf ? "Quarter-finals" : kf.r16 ? "Round of 16" : allGroupsFinal ? "Round of 32"
-    : (groupMatchesPlayed > 0 || finalGroups.length > 0) ? "Group stage" : "Kicks off June 11";
-  const survivors = kf.champion ? (koActual?.champion || [])
-    : kf.final ? (koActual?.final || []) : kf.sf ? (koActual?.sf || [])
-    : kf.qf ? (koActual?.qf || []) : kf.r16 ? (koActual?.r16 || [])
+  const stageLabel = !allGroupsFinal
+    ? ((groupMatchesPlayed > 0 || finalGroups.length > 0) ? "Group stage" : "Kicks off June 11")
+    : nChamp > 0 ? "Champion crowned 🏆"
+    : nR16 < 16 ? "Round of 32"
+    : nQF < 8 ? "Round of 16"
+    : nSF < 4 ? "Quarter-finals"
+    : nFin < 2 ? "Semi-finals"
+    : "The Final";
+  const survivors = nChamp > 0 ? (ka.champion || [])
+    : nFin > 0 ? (ka.final || [])
+    : nSF > 0 ? (ka.sf || [])
+    : nQF > 0 ? (ka.qf || [])
+    : nR16 > 0 ? (ka.r16 || [])
     : (allGroupsFinal && koPool.length === 32 ? koPool : null);
 
   // current user's live group breakdown (projection)
@@ -2612,8 +2626,8 @@ export default function App() {
 
                         {/* Step 3: actual results */}
                         <div style={{ marginBottom: 12 }}>
-                          <div className="wc-display" style={{ fontSize: 18, marginBottom: 2 }}>3. Actual results</div>
-                          <p style={{ fontSize: 12, color: C.mute, margin: 0 }}>Tap the teams that actually advanced, then mark each round <b>Official</b> to score it.</p>
+                          <div className="wc-display" style={{ fontSize: 18, marginBottom: 2 }}>3. Who advanced</div>
+                          <p style={{ fontSize: 12, color: C.mute, margin: "0 0 8px" }}>The sync fills this in automatically after each knockout game. Tap a team only to correct a mistake — every bracket scores off this list. Each correct pick earns: <b>R32 +3 · R16 +5 · QF +9 · SF +16 · Champion +30 · both finalists +18</b>. Points add up as each team advances, so you don't need to wait for a round to finish.</p>
                         </div>
                         <KnockoutBoard pool={koPoolDraft} ko={koDraft.actual} onToggle={toggleKoActual} editable
                           showFinals finals={koDraft.finals} onToggleFinal={toggleKoFinal} />
@@ -2622,7 +2636,7 @@ export default function App() {
                           width: "100%", marginTop: 18, background: C.grad, color: "#201700", border: "none",
                           borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: "pointer",
                           display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: GRAD_SHADOW,
-                        }}><Save size={18} /> Save knockout & score the pool</button>
+                        }}><Save size={18} /> Save knockout results</button>
                       </>
                     )}
                   </>
@@ -2755,14 +2769,14 @@ export default function App() {
                 <GitBranch size={18} color={C.gold} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 800, fontSize: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pv.name}{identity && pv.slug === identity.slug ? " (you)" : ""}'s bracket</div>
-                  {(bracket?.results?.reachedR16?.length || bracket?.results?.champion) ? <div style={{ fontSize: 11.5, color: C.mute, fontWeight: 700 }}>{pv.brPts || 0} bracket pts so far</div> : null}
+                  {(koResults?.reachedR16?.length || koResults?.champion) ? <div style={{ fontSize: 11.5, color: C.mute, fontWeight: 700 }}>{pv.brPts || 0} bracket pts so far</div> : null}
                 </div>
                 <button className="wc-btn" onClick={() => setViewBracketSlug(null)} style={{ border: `1px solid ${C.line}`, background: "transparent", borderRadius: 10, padding: "8px 11px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 800, fontSize: 13, color: C.text, flexShrink: 0 }}>
                   <X size={15} /> Close
                 </button>
               </div>
               <div style={{ flex: 1, overflow: "auto" }}>
-                <BracketTree seeds={bracket?.seeds} picks={pv.koBracket} results={bracket?.results} />
+                <BracketTree seeds={bracket?.seeds} picks={pv.koBracket} results={koResults} />
               </div>
             </div>
           </div>
@@ -2814,7 +2828,8 @@ function Empty({ icon: Icon, text }) {
 function LeaderRow({ p, rank, finalGroups, koScoredRounds }) {
   const [open, setOpen] = useState(false);
   const medal = rank === 1 ? C.gold : rank === 2 ? "#9AA0A6" : rank === 3 ? "#CD7F4A" : C.mute;
-  const hasKo = koScoredRounds.length > 0;
+  const hasBr = (p.brPts || 0) > 0;
+  const shownTotal = p.combined != null ? p.combined : p.total;
   return (
     <div className="wc-fade wc-glass" style={{ background: C.panel, border: `1px solid ${rank === 1 ? C.gold : C.line}`, borderRadius: 18, marginBottom: 10, overflow: "hidden", boxShadow: rank === 1 ? "0 10px 30px rgba(232,184,75,.14)" : "0 6px 18px rgba(20,20,25,.08)" }}>
       <button className="wc-btn" onClick={() => setOpen((o) => !o)} style={{
@@ -2825,11 +2840,11 @@ function LeaderRow({ p, rank, finalGroups, koScoredRounds }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 800, fontSize: 16 }}>{p.name}</div>
           <div style={{ fontSize: 11.5, color: C.mute }}>
-            {hasKo ? <>Group {p.groupPts} · Knockout {p.koPts}</> : <>{open ? "Hide" : "Tap for"} group breakdown</>}
+            {hasBr ? <>Group {p.groupPts} · Bracket {p.brPts}</> : <>{open ? "Hide" : "Tap for"} group breakdown</>}
           </div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div className="wc-mono" style={{ fontSize: 24, fontWeight: 700, color: rank === 1 ? C.gold : C.green, lineHeight: 1 }}>{p.total}</div>
+          <div className="wc-mono" style={{ fontSize: 24, fontWeight: 700, color: rank === 1 ? C.gold : C.green, lineHeight: 1 }}>{shownTotal}</div>
           <div style={{ fontSize: 10.5, color: C.mute, fontWeight: 700 }}>POINTS</div>
         </div>
       </button>
@@ -2844,19 +2859,11 @@ function LeaderRow({ p, rank, finalGroups, koScoredRounds }) {
               </div>
             ))}
           </div>
-          {hasKo && (
-            <>
-              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", color: C.mute, margin: "12px 0 6px" }}>KNOCKOUT</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {koScoredRounds.map((r) => (
-                  <div key={r.key} style={{ background: C.panel2, borderRadius: 8, padding: "6px 10px", border: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 2, background: r.color }} />
-                    <span style={{ fontSize: 11.5, fontWeight: 700, color: C.mute }}>{r.label}</span>
-                    <span className="wc-mono" style={{ fontSize: 13, fontWeight: 700, color: (p.koPer?.[r.key] || 0) > 0 ? C.green : C.mute }}>{p.koPer?.[r.key] || 0}</span>
-                  </div>
-                ))}
-              </div>
-            </>
+          {hasBr && (
+            <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 12px" }}>
+              <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".08em", color: C.mute }}>BRACKET POINTS</span>
+              <span className="wc-mono" style={{ fontSize: 15, fontWeight: 700, color: C.gold }}>{p.brPts}</span>
+            </div>
           )}
         </div>
       )}
