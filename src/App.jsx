@@ -1103,7 +1103,6 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [lastSync, setLastSync] = useState(null);
-  const didAutoSync = useRef(false);
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2200); };
 
@@ -1240,12 +1239,6 @@ export default function App() {
     setIdentity(null); setCommitted(false); setName(""); setPicks(freshPicks()); setKoPicks(emptyKo()); setPhase("group"); setScope("global");
   };
 
-  useEffect(() => {
-    if (view === "results" && isAdmin && !didAutoSync.current) {
-      didAutoSync.current = true;
-      autoSync();
-    }
-  }, [view, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reorderGroup = (gk, next) => setPicks((p) => ({ ...p, [gk]: next }));
   const reorderResult = (gk, next) => setResultsDraft((p) => ({ ...p, [gk]: { ...p[gk], order: next } }));
@@ -1403,6 +1396,9 @@ export default function App() {
   const autoSync = async () => {
     if (syncing) return;
     setSyncing(true); setSyncMsg("");
+    // snapshot everyone's points BEFORE the sync so "movers" can show what this sync changed
+    const preBaseline = {};
+    standings.forEach((p) => { preBaseline[p.slug] = (p.combined != null ? p.combined : (p.total || 0)); });
     try {
       const res = await fetch("/api/sync", { method: "POST" });
       const j = await res.json();
@@ -1410,6 +1406,12 @@ export default function App() {
       await loadAll();
       setLastSync(Date.now());
       const groupsSet = j.groupsSet || 0, koNew = j.koNew || 0;
+      if (groupsSet > 0 || koNew > 0) {
+        // results changed — reset the movers baseline to the pre-sync standings
+        const snap = { v: 5, baseline: preBaseline, at: Date.now() };
+        await store.set(MOVERS_KEY, JSON.stringify(snap));
+        setMoversSnap(snap);
+      }
       const bits = [];
       if (groupsSet) bits.push(`${groupsSet}/12 groups`);
       if (koNew) bits.push(`${koNew} knockout result${koNew > 1 ? "s" : ""}`);
@@ -1611,19 +1613,7 @@ export default function App() {
     };
   }).sort((a, b) => b.total - a.total || a.submittedAt - b.submittedAt);
 
-  // ----- daily movers: capture a once-a-day baseline of everyone's projected total -----
-  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }); // Pacific YYYY-MM-DD
-  useEffect(() => {
-    if (!storageReady || !moversLoaded || standings.length === 0) return;
-    const anyScored = standings.some((p) => (p.totalProjected || 0) > 0);
-    if (!anyScored) return; // never set a baseline before there's any scoring (avoids a meaningless all-zero start)
-    if (moversSnap?.baselineDay === todayStr && moversSnap?.v === 4) return; // today's baseline already saved
-    const baseline = {};
-    standings.forEach((p) => { baseline[p.slug] = (p.combined != null ? p.combined : p.totalProjected); });
-    const snap = { v: 4, baselineDay: todayStr, baseline };
-    setMoversSnap(snap);
-    store.set(MOVERS_KEY, JSON.stringify(snap));
-  }, [storageReady, moversLoaded, standings, moversSnap, todayStr]);
+  // movers baseline is captured at each sync (see autoSync) so "movers" = points gained since the last results pull
 
   // league scope
   const myCode = identity?.groupCode || null;
@@ -1649,8 +1639,8 @@ export default function App() {
     ? [...scopedStandings].filter((p) => bv !== "bracket" || hasBracket(p)).sort((a, b) => viewMetric(b) - viewMetric(a) || (a.submittedAt || 0) - (b.submittedAt || 0))
     : scopedStandings;
 
-  // movers = rank + point change WITHIN the current view vs today's baseline (combined points)
-  const moversBase = moversSnap?.v === 4 ? moversSnap.baseline : null;
+  // movers = rank + point change vs the standings snapshot taken at the last sync
+  const moversBase = moversSnap?.v === 5 ? moversSnap.baseline : null;
   let moversList = [];
   if (moversBase) {
     const eligible = scopedStandings.filter((p) => moversBase[p.slug] != null); // already in current order
@@ -1662,8 +1652,10 @@ export default function App() {
     moversList = eligible.map((p) => ({ slug: p.slug, name: p.name, delta: baseRank[p.slug] - curRank[p.slug], pts: Math.max(0, Math.round(curVal(p) - moversBase[p.slug])) }))
       .filter((m) => m.delta !== 0 || m.pts !== 0);
   }
-  const climbers = moversList.filter((m) => m.delta > 0 || m.pts > 0).sort((a, b) => (b.pts - a.pts) || (b.delta - a.delta)).slice(0, 3);
-  const fallers = moversList.filter((m) => m.delta < 0).sort((a, b) => a.delta - b.delta).slice(0, 3);
+  const allClimbers = moversList.filter((m) => m.delta > 0 || m.pts > 0);
+  const climberSlugs = new Set(allClimbers.map((m) => m.slug));
+  const climbers = [...allClimbers].sort((a, b) => (b.pts - a.pts) || (b.delta - a.delta)).slice(0, 3);
+  const fallers = moversList.filter((m) => m.delta < 0 && !climberSlugs.has(m.slug)).sort((a, b) => a.delta - b.delta).slice(0, 3);
   const hasMovers = climbers.length > 0 || fallers.length > 0;
 
   // pool of 32 qualifiers (uses saved third-place selection)
@@ -2170,7 +2162,7 @@ export default function App() {
             {(!bracketActive || boardTab === "scores") && (<>
             {hasMovers && (
               <div className="wc-glass" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, padding: 14, marginBottom: 14, boxShadow: "0 8px 24px rgba(20,20,25,.07)" }}>
-                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".14em", color: C.mute, marginBottom: 10 }}>TODAY'S MOVERS</div>
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".14em", color: C.mute, marginBottom: 10 }}>SINCE LAST SYNC</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {climbers.map((m) => (
                     <div key={m.slug} style={{ display: "flex", alignItems: "center", gap: 9 }}>
@@ -2188,7 +2180,7 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-                <div style={{ fontSize: 10.5, color: C.mute, marginTop: 9, opacity: .8 }}>{bracketActive ? "Points gained & rank change since the start of the day." : "Rank change since the start of the day (projected)."}</div>
+                <div style={{ fontSize: 10.5, color: C.mute, marginTop: 9, opacity: .8 }}>{bracketActive ? "Points gained & rank change from the latest results sync." : "Rank change from the latest results sync."}</div>
               </div>
             )}
             {scopedPreds.length > 0 && (
