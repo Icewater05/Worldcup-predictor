@@ -1652,10 +1652,9 @@ export default function App() {
     moversList = eligible.map((p) => ({ slug: p.slug, name: p.name, delta: baseRank[p.slug] - curRank[p.slug], pts: Math.max(0, Math.round(curVal(p) - moversBase[p.slug])) }))
       .filter((m) => m.delta !== 0 || m.pts !== 0);
   }
-  const allClimbers = moversList.filter((m) => m.delta > 0 || m.pts > 0);
-  const climberSlugs = new Set(allClimbers.map((m) => m.slug));
-  const climbers = [...allClimbers].sort((a, b) => (b.pts - a.pts) || (b.delta - a.delta)).slice(0, 3);
-  const fallers = moversList.filter((m) => m.delta < 0 && !climberSlugs.has(m.slug)).sort((a, b) => a.delta - b.delta).slice(0, 3);
+  // movers = players who changed BOARD POSITION since the last sync (points shown as secondary context)
+  const climbers = moversList.filter((m) => m.delta > 0).sort((a, b) => (b.delta - a.delta) || (b.pts - a.pts)).slice(0, 3);
+  const fallers = moversList.filter((m) => m.delta < 0).sort((a, b) => (a.delta - b.delta) || (b.pts - a.pts)).slice(0, 3);
   const hasMovers = climbers.length > 0 || fallers.length > 0;
 
   // pool of 32 qualifiers (uses saved third-place selection)
@@ -2168,19 +2167,20 @@ export default function App() {
                     <div key={m.slug} style={{ display: "flex", alignItems: "center", gap: 9 }}>
                       <TrendingUp size={15} color={C.pos} />
                       <span style={{ flex: 1, fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
-                      {m.pts > 0 && <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.pos }}>+{m.pts} pts</span>}
-                      {m.delta > 0 && <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.pos, opacity: .75 }}>▲{m.delta}</span>}
+                      {m.pts > 0 && <span className="wc-mono" style={{ fontWeight: 700, fontSize: 12, color: C.mute }}>+{m.pts}</span>}
+                      <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.pos }}>▲{m.delta} {m.delta === 1 ? "spot" : "spots"}</span>
                     </div>
                   ))}
                   {fallers.map((m) => (
                     <div key={m.slug} style={{ display: "flex", alignItems: "center", gap: 9 }}>
                       <TrendingDown size={15} color={C.coral} />
                       <span style={{ flex: 1, fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
-                      <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.coral }}>▼{Math.abs(m.delta)}</span>
+                      {m.pts > 0 && <span className="wc-mono" style={{ fontWeight: 700, fontSize: 12, color: C.mute }}>+{m.pts}</span>}
+                      <span className="wc-mono" style={{ fontWeight: 800, fontSize: 13, color: C.coral }}>▼{Math.abs(m.delta)} {Math.abs(m.delta) === 1 ? "spot" : "spots"}</span>
                     </div>
                   ))}
                 </div>
-                <div style={{ fontSize: 10.5, color: C.mute, marginTop: 9, opacity: .8 }}>{bracketActive ? "Points gained & rank change from the latest results sync." : "Rank change from the latest results sync."}</div>
+                <div style={{ fontSize: 10.5, color: C.mute, marginTop: 9, opacity: .8 }}>Places moved on the board since the last sync{bracketActive ? " (points gained shown too)" : ""}.</div>
               </div>
             )}
             {scopedPreds.length > 0 && (
