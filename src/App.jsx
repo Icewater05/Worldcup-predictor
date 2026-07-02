@@ -564,6 +564,18 @@ function BracketTree({ seeds, picks, results }) {
   const champ = (picks && picks["4_0"]) || null;
   const scored = (r, t) => t && (r < 4 ? reached[r].has(t) : results?.champion === t);
   const comp = (r, m) => (r === 0 ? (seeds[m] || [null, null]) : [picks && picks[`${r - 1}_${2 * m}`], picks && picks[`${r - 1}_${2 * m + 1}`]]);
+  // teams actually knocked out (lost a played match) — so a pick only gets a red X if its team is really out, not just "hasn't played yet"
+  const elim = new Set();
+  {
+    const pairUp = (arr) => { const o = []; for (let i = 0; i < arr.length; i += 2) o.push([arr[i], arr[i + 1]]); return o; };
+    const won = (pairs, set) => pairs.map(([a, b]) => { if (!a || !b) return a || b || null; const aw = set.has(a), bw = set.has(b); if (aw && !bw) { elim.add(b); return a; } if (bw && !aw) { elim.add(a); return b; } return null; });
+    const w32 = won(seeds, reached[0]);
+    const w16 = won(pairUp(w32), reached[1]);
+    const w8 = won(pairUp(w16), reached[2]);
+    const w4 = won(pairUp(w8), reached[3]);
+    const cw = results?.champion;
+    if (cw && w4.filter(Boolean).length === 2) { const ru = w4.find((t) => t && t !== cw); if (ru) elim.add(ru); }
+  }
   const hasResults = !!(results && (results.reachedR16?.length || results.champion));
   const BOX_W = 150, MATCH_H = 50, UNIT = 62, COL_STEP = 180, TOTAL_H = 16 * UNIT;
   const colX = (r) => r * COL_STEP;
@@ -594,7 +606,7 @@ function BracketTree({ seeds, picks, results }) {
             const teamRow = (t) => {
               const isPick = t && t === pick;
               const ok = isPick && hasResults && scored(r, t);
-              const miss = isPick && hasResults && !scored(r, t);
+              const miss = isPick && hasResults && !scored(r, t) && elim.has(t);
               return (
                 <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 6px", borderRadius: 6, height: MATCH_H / 2 - 3,
                   background: isPick ? (ok ? "rgba(62,158,94,.14)" : miss ? "rgba(217,84,74,.12)" : "rgba(200,144,28,.13)") : "transparent" }}>
@@ -1643,12 +1655,14 @@ export default function App() {
   const moversBase = moversSnap?.v === 5 ? moversSnap.baseline : null;
   let moversList = [];
   if (moversBase) {
-    const eligible = scopedStandings.filter((p) => moversBase[p.slug] != null); // already in current order
-    const curRank = {}; eligible.forEach((p, i) => { curRank[p.slug] = i + 1; });
+    const eligible = scopedStandings.filter((p) => moversBase[p.slug] != null);
+    const curVal = (p) => (p.combined != null ? p.combined : (p.total || 0));
+    const curRank = {};
+    [...eligible].sort((a, b) => (curVal(b) - curVal(a)) || ((a.submittedAt || 0) - (b.submittedAt || 0)))
+      .forEach((p, i) => { curRank[p.slug] = i + 1; });
     const baseRank = {};
     [...eligible].sort((a, b) => (moversBase[b.slug] - moversBase[a.slug]) || ((a.submittedAt || 0) - (b.submittedAt || 0)))
       .forEach((p, i) => { baseRank[p.slug] = i + 1; });
-    const curVal = (p) => (p.combined != null ? p.combined : p.totalProjected);
     moversList = eligible.map((p) => ({ slug: p.slug, name: p.name, delta: baseRank[p.slug] - curRank[p.slug], pts: Math.max(0, Math.round(curVal(p) - moversBase[p.slug])) }))
       .filter((m) => m.delta !== 0 || m.pts !== 0);
   }
